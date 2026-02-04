@@ -2,14 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { GovernanceService } from "../../lib/governance.js";
 import { createIssueOperations } from "../../lib/github-client.js";
 import { LABELS, MESSAGES } from "../../config.js";
-import { processImplementationIntake } from "./index.js";
+import { processImplementationIntake, recalculateLeaderboardForPR } from "./index.js";
 import type { IssueRef, LinkedIssue } from "../../lib/types.js";
 import { hasLabel } from "../../lib/types.js";
 import type { IncomingMessage, ServerResponse } from "http";
-import {
-  getLinkedIssues,
-  getOpenPRsForIssue,
-} from "../../lib/graphql-queries.js";
+import { getLinkedIssues } from "../../lib/graphql-queries.js";
 
 // Mock probot to prevent actual initialization
 vi.mock("probot", () => ({
@@ -26,7 +23,6 @@ vi.mock("../../lib/env-validation.js", () => ({
 // Mock GraphQL queries used by leaderboard updates
 vi.mock("../../lib/graphql-queries.js", () => ({
   getLinkedIssues: vi.fn(),
-  getOpenPRsForIssue: vi.fn(),
 }));
 
 /**
@@ -235,7 +231,7 @@ describe("Queen Bot", () => {
     const createMockOctokit = () => ({
       rest: {
         issues: {
-          get: vi.fn().mockResolvedValue({ data: {} }),
+          get: vi.fn().mockResolvedValue({ data: { labels: [] } }),
           addLabels: vi.fn().mockResolvedValue({}),
           removeLabel: vi.fn().mockResolvedValue({}),
           createComment: vi.fn().mockResolvedValue({}),
@@ -286,9 +282,6 @@ describe("Queen Bot", () => {
       };
 
       vi.mocked(getLinkedIssues).mockResolvedValue([readyIssue]);
-      vi.mocked(getOpenPRsForIssue).mockResolvedValue([
-        { number: 101, title: "PR", author: { login: "agent" } },
-      ]);
 
       const issues = {
         getLabelAddedTime: vi.fn().mockResolvedValue(new Date("2026-02-01T00:00:00Z")),
@@ -318,6 +311,136 @@ describe("Queen Bot", () => {
       });
 
       expect(mockOctokit.rest.issues.createComment).toHaveBeenCalled();
+    });
+  });
+
+  describe("Leaderboard race condition fix", () => {
+    const createMockOctokit = () => ({
+      rest: {
+        issues: {
+          get: vi.fn().mockResolvedValue({ data: { labels: [] } }),
+          addLabels: vi.fn().mockResolvedValue({}),
+          removeLabel: vi.fn().mockResolvedValue({}),
+          createComment: vi.fn().mockResolvedValue({}),
+          updateComment: vi.fn().mockResolvedValue({}),
+          listEventsForTimeline: vi.fn().mockResolvedValue({ data: [] }),
+          listComments: vi.fn().mockResolvedValue({ data: [] }),
+          listForRepo: vi.fn().mockResolvedValue({ data: [] }),
+          lock: vi.fn().mockResolvedValue({}),
+          unlock: vi.fn().mockResolvedValue({}),
+        },
+        pulls: {
+          get: vi.fn().mockResolvedValue({
+            data: {
+              number: 101,
+              state: "open",
+              merged: false,
+              created_at: "2026-02-01T00:00:00Z",
+              updated_at: "2026-02-02T00:00:00Z",
+              user: { login: "agent" },
+            },
+          }),
+          update: vi.fn().mockResolvedValue({}),
+          listReviews: vi.fn().mockResolvedValue({ data: [] }),
+          listCommits: vi.fn().mockResolvedValue({ data: [] }),
+          listReviewComments: vi.fn().mockResolvedValue({ data: [] }),
+        },
+        reactions: {
+          listForIssueComment: vi.fn().mockResolvedValue({ data: [] }),
+        },
+      },
+      paginate: {
+        iterator: vi.fn().mockReturnValue({
+          async *[Symbol.asyncIterator]() {
+            yield { data: [] };
+          },
+        }),
+      },
+    });
+
+    it("should include PR when label search misses it", async () => {
+      const mockOctokit = createMockOctokit();
+
+      const readyIssue: LinkedIssue = {
+        number: 7,
+        title: "Ready issue",
+        state: "OPEN",
+        labels: { nodes: [{ name: LABELS.READY_TO_IMPLEMENT }] },
+      };
+
+      vi.mocked(getLinkedIssues).mockResolvedValue([readyIssue]);
+      mockOctokit.rest.issues.listForRepo.mockResolvedValue({ data: [] });
+      mockOctokit.rest.issues.get.mockResolvedValue({
+        data: {
+          labels: [{ name: LABELS.IMPLEMENTATION }],
+        },
+      });
+
+      await recalculateLeaderboardForPR(
+        mockOctokit,
+        { info: vi.fn() },
+        "hivemoot",
+        "colony",
+        101
+      );
+
+      // The leaderboard comment should include PR #101
+      const createCommentCalls = mockOctokit.rest.issues.createComment.mock.calls;
+      const updateCommentCalls = mockOctokit.rest.issues.updateComment.mock.calls;
+      const allCommentBodies = [
+        ...createCommentCalls.map((c: Array<{ body?: string }>) => c[0]?.body ?? ""),
+        ...updateCommentCalls.map((c: Array<{ body?: string }>) => c[0]?.body ?? ""),
+      ];
+
+      const leaderboardPosted = allCommentBodies.some(
+        (body: string) => body.includes("#101")
+      );
+      expect(leaderboardPosted).toBe(true);
+    });
+
+    it("should not duplicate PR when label search includes it", async () => {
+      const mockOctokit = createMockOctokit();
+
+      const readyIssue: LinkedIssue = {
+        number: 7,
+        title: "Ready issue",
+        state: "OPEN",
+        labels: { nodes: [{ name: LABELS.READY_TO_IMPLEMENT }] },
+      };
+
+      vi.mocked(getLinkedIssues).mockResolvedValue([readyIssue]);
+
+      // findPRsWithLabel returns PR #101
+      mockOctokit.rest.issues.listForRepo.mockResolvedValue({
+        data: [{
+          number: 101,
+          pull_request: {},
+          created_at: "2026-02-01T00:00:00Z",
+          updated_at: "2026-02-02T00:00:00Z",
+          labels: [{ name: LABELS.IMPLEMENTATION }],
+        }],
+      });
+
+      // Should not throw or produce duplicate entries
+      await recalculateLeaderboardForPR(
+        mockOctokit,
+        { info: vi.fn() },
+        "hivemoot",
+        "colony",
+        101
+      );
+
+      const createCommentCalls = mockOctokit.rest.issues.createComment.mock.calls;
+      const updateCommentCalls = mockOctokit.rest.issues.updateComment.mock.calls;
+      const allCommentBodies = [
+        ...createCommentCalls.map((c: Array<{ body?: string }>) => c[0]?.body ?? ""),
+        ...updateCommentCalls.map((c: Array<{ body?: string }>) => c[0]?.body ?? ""),
+      ];
+
+      const entries = allCommentBodies
+        .join("\n")
+        .match(/#101/g) ?? [];
+      expect(entries.length).toBe(1);
     });
   });
 

@@ -14,12 +14,12 @@ import {
 } from "../../lib/index.js";
 import {
   getLinkedIssues,
-  getOpenPRsForIssue,
   type GraphQLClient,
 } from "../../lib/graphql-queries.js";
 import type { LinkedIssue, PRWithApprovals, PullRequest } from "../../lib/types.js";
 import { hasLabel } from "../../lib/types.js";
 import { validateEnv, getAppId } from "../../lib/env-validation.js";
+import { logger } from "../../lib/logger.js";
 
 /**
  * Queen Bot - Hivemoot Governance Automation
@@ -78,6 +78,138 @@ function getRepoContext(repository: { owner: { login: string }; name: string; fu
 /** Filter linked issues to only those in phase:ready-to-implement */
 function filterReadyIssues(issues: LinkedIssue[]): LinkedIssue[] {
   return issues.filter((issue) => hasLabel(issue, LABELS.READY_TO_IMPLEMENT));
+}
+
+/**
+ * Build a map of ready issue numbers to active implementation PRs.
+ *
+ * Uses PR-side linking (closingIssuesReferences) to avoid relying on
+ * cross-reference timeline events that may lag behind PR creation.
+ */
+async function getImplementationPRsByIssue(params: {
+  octokit: GraphQLClient;
+  prs: ReturnType<typeof createPROperations>;
+  owner: string;
+  repo: string;
+  issueNumbers: number[];
+  ensurePRNumber?: number;
+  linkedIssuesByPRNumber?: Map<number, LinkedIssue[]>;
+}): Promise<Map<number, PullRequest[]>> {
+  const {
+    octokit,
+    prs,
+    owner,
+    repo,
+    issueNumbers,
+    ensurePRNumber,
+    linkedIssuesByPRNumber,
+  } = params;
+
+  const issueNumberSet = new Set(issueNumbers);
+  const results = new Map<number, PullRequest[]>();
+
+  for (const issueNumber of issueNumbers) {
+    results.set(issueNumber, []);
+  }
+
+  if (issueNumberSet.size === 0) {
+    return results;
+  }
+
+  const implementationPRs = await prs.findPRsWithLabel(owner, repo, LABELS.IMPLEMENTATION);
+  const candidateNumbers = new Set(implementationPRs.map((pr) => pr.number));
+
+  if (ensurePRNumber !== undefined && !candidateNumbers.has(ensurePRNumber)) {
+    const labels = await prs.getLabels({ owner, repo, prNumber: ensurePRNumber });
+    if (labels.includes(LABELS.IMPLEMENTATION)) {
+      candidateNumbers.add(ensurePRNumber);
+      logger.debug(`ensurePR #${ensurePRNumber}: added via direct label check (not yet indexed)`);
+    }
+  }
+
+  const linkedIssuesCache = linkedIssuesByPRNumber ?? new Map<number, LinkedIssue[]>();
+  const prDetailsCache = new Map<number, PullRequest>();
+  const candidates = Array.from(candidateNumbers);
+
+  logger.debug(
+    `Found ${candidates.length} candidate implementation PRs for issues [${issueNumbers.join(", ")}]`
+  );
+
+  const getPullRequestSummary = async (prNumber: number): Promise<PullRequest | null> => {
+    const cached = prDetailsCache.get(prNumber);
+    if (cached) {
+      return cached;
+    }
+
+    const details = await prs.get({ owner, repo, prNumber });
+    const normalizedState =
+      details.merged ? "MERGED" : details.state.toUpperCase() === "OPEN" ? "OPEN" : "CLOSED";
+
+    if (normalizedState !== "OPEN") {
+      return null;
+    }
+
+    const summary: PullRequest = {
+      number: prNumber,
+      title: "",
+      state: normalizedState,
+      author: { login: details.author },
+    };
+
+    prDetailsCache.set(prNumber, summary);
+    return summary;
+  };
+
+  for (let i = 0; i < candidates.length; i += APPROVAL_FETCH_CONCURRENCY) {
+    const batch = candidates.slice(i, i + APPROVAL_FETCH_CONCURRENCY);
+    const batchResults = await Promise.all(
+      batch.map(async (prNumber) => {
+        try {
+          const cachedLinkedIssues = linkedIssuesCache.get(prNumber);
+          const linkedIssues =
+            cachedLinkedIssues ?? (await getLinkedIssues(octokit, owner, repo, prNumber));
+
+          if (!cachedLinkedIssues) {
+            linkedIssuesCache.set(prNumber, linkedIssues);
+          }
+
+          const linkedIssueNumbers = linkedIssues
+            .map((issue) => issue.number)
+            .filter((number) => issueNumberSet.has(number));
+
+          if (linkedIssueNumbers.length === 0) {
+            return null;
+          }
+
+          const prSummary = await getPullRequestSummary(prNumber);
+          if (!prSummary) {
+            return null;
+          }
+
+          return { prSummary, linkedIssueNumbers };
+        } catch (error) {
+          // PR may have been deleted or is inaccessible — skip it rather than
+          // crashing the entire batch and losing all other candidates.
+          logger.warn(
+            `Skipping candidate PR #${prNumber}: ${error instanceof Error ? error.message : String(error)}`
+          );
+          return null;
+        }
+      })
+    );
+
+    for (const result of batchResults) {
+      if (!result) {
+        continue;
+      }
+
+      for (const issueNumber of result.linkedIssueNumbers) {
+        results.get(issueNumber)?.push(result.prSummary);
+      }
+    }
+  }
+
+  return results;
 }
 
 /**
@@ -173,8 +305,17 @@ export async function processImplementationIntake(params: {
   }
 
   const activationDate = await prs.getActivationDate(prRef, prDetails.createdAt);
-  const implementationPRs = await prs.findPRsWithLabel(owner, repo, LABELS.IMPLEMENTATION);
-  const implementationPRNumbers = new Set(implementationPRs.map((pr) => pr.number));
+  const readyIssues = filterReadyIssues(linkedIssues);
+  const activeImplementationPRsByIssue =
+    readyIssues.length > 0
+      ? await getImplementationPRsByIssue({
+          octokit,
+          prs,
+          owner,
+          repo,
+          issueNumbers: readyIssues.map((issue) => issue.number),
+        })
+      : new Map<number, PullRequest[]>();
 
   let welcomed = false;
 
@@ -203,8 +344,7 @@ export async function processImplementationIntake(params: {
       continue;
     }
 
-    const openPRs = await getOpenPRsForIssue(octokit, owner, repo, linkedIssue.number);
-    const activePRs = openPRs.filter((pr) => implementationPRNumbers.has(pr.number));
+    const activePRs = activeImplementationPRsByIssue.get(linkedIssue.number) ?? [];
     const otherActivePRs = activePRs.filter((pr) => pr.number !== prNumber);
     const totalPRCountIfAccepted = otherActivePRs.length + 1;
 
@@ -261,12 +401,27 @@ export async function recalculateLeaderboardForPR(
   const prs = createPROperations(octokit, { appId });
 
   const linkedIssues = await getLinkedIssues(octokit, owner, repo, prNumber);
-  const implementationPRs = await prs.findPRsWithLabel(owner, repo, LABELS.IMPLEMENTATION);
-  const implementationPRNumbers = new Set(implementationPRs.map((pr) => pr.number));
+  const readyIssues = filterReadyIssues(linkedIssues);
 
-  for (const linkedIssue of filterReadyIssues(linkedIssues)) {
-    const competingPRs = await getOpenPRsForIssue(octokit, owner, repo, linkedIssue.number);
-    const activePRs = competingPRs.filter((pr) => implementationPRNumbers.has(pr.number));
+  if (readyIssues.length === 0) {
+    return;
+  }
+
+  const linkedIssuesCache = new Map<number, LinkedIssue[]>();
+  linkedIssuesCache.set(prNumber, linkedIssues);
+
+  const activeImplementationPRsByIssue = await getImplementationPRsByIssue({
+    octokit,
+    prs,
+    owner,
+    repo,
+    issueNumbers: readyIssues.map((issue) => issue.number),
+    ensurePRNumber: prNumber,
+    linkedIssuesByPRNumber: linkedIssuesCache,
+  });
+
+  for (const linkedIssue of readyIssues) {
+    const activePRs = activeImplementationPRsByIssue.get(linkedIssue.number) ?? [];
     const scores = await fetchApprovalScores(prs, activePRs, owner, repo);
 
     await leaderboard.upsertLeaderboard(

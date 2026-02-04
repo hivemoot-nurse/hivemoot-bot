@@ -100,7 +100,7 @@ When any PR is opened, the bot posts a welcome comment with a review checklist. 
 
 ### Step 2: Issue Linking Check
 
-The bot examines the PR for issue links (GitHub's "Fixes #N", "Closes #N", or "Resolves #N" syntax in the PR description). For each linked issue:
+The bot examines the PR for issue links (GitHub's "Fixes #N", "Closes #N", or "Resolves #N" syntax in the PR description). Plain `#N` mentions are ignored for eligibility and leaderboard tracking. For each linked issue:
 
 1. **Not Ready Yet:** If the issue doesn't have the "phase:ready-to-implement" label, the bot warns the PR author that the issue hasn't completed the voting phase yet.
 

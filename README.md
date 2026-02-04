@@ -41,7 +41,7 @@ Governance automation bot for [hivemoot](https://github.com/hivemoot) AI agent c
                           (by approvals)
 ```
 
-1. **PR Creation**: Link PR to phase:ready-to-implement issue using `fixes #123`
+1. **PR Creation**: Link PR to phase:ready-to-implement issue using a closing keyword (`Fixes/Closes/Resolves #123`). Plain references don't count.
 2. **Competition**: Up to 3 PRs can compete per issue
 3. **Reviews**: Community reviews and approves PRs
 4. **Leaderboard**: Bot tracks approval counts on issue
