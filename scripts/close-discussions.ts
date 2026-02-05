@@ -37,7 +37,7 @@ interface SkippedIssue {
   issueNumber: number;
 }
 
-type AccessIssueReason = "rate_limit" | "forbidden";
+export type AccessIssueReason = "rate_limit" | "forbidden";
 
 interface AccessIssue {
   repo: string;
@@ -255,7 +255,7 @@ function isNotFound(error: unknown): boolean {
  * If an `earlyCheck` is provided in the phase config, it runs first — allowing
  * early decision to close voting before the full timer expires.
  */
-async function processIssuePhase(
+export async function processIssuePhase(
   issues: IssueOperations,
   governance: GovernanceService,
   ref: IssueRef,

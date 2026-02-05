@@ -56,7 +56,7 @@ vi.mock("../api/lib/env-validation.js", () => ({
 }));
 
 // Import after all mocks are in place
-import { notifyPendingPRs, isRetryableError, withRetry, makeEarlyDecisionCheck } from "./close-discussions.js";
+import { notifyPendingPRs, isRetryableError, withRetry, makeEarlyDecisionCheck, processIssuePhase } from "./close-discussions.js";
 import type { EarlyDecisionDeps } from "./close-discussions.js";
 import { getOpenPRsForIssue, logger } from "../api/lib/index.js";
 import { PR_MESSAGES } from "../api/config.js";
@@ -66,84 +66,209 @@ import type { VotingExit } from "../api/lib/repo-config.js";
 const mockGetOpenPRsForIssue = vi.mocked(getOpenPRsForIssue);
 
 describe("close-discussions script", () => {
-  describe("phase transition logic", () => {
-    it("should transition when elapsed time exceeds duration", () => {
-      const durationMs = 5 * 60 * 1000; // 5 minutes
-      const labeledAt = new Date(Date.now() - 10 * 60 * 1000); // 10 minutes ago
-      const elapsed = Date.now() - labeledAt.getTime();
+  describe("processIssuePhase", () => {
+    const ref: IssueRef = { owner: "test-org", repo: "test-repo", issueNumber: 42 };
+    const labelName = "governance:discussion";
+    const phaseName = "discussion";
+    const durationMs = 5 * 60 * 1000; // 5 minutes
 
-      expect(elapsed >= durationMs).toBe(true);
+    let mockGetLabelAddedTime: ReturnType<typeof vi.fn>;
+    let mockIssues: { getLabelAddedTime: ReturnType<typeof vi.fn> };
+    let transitionFn: ReturnType<typeof vi.fn>;
+    let onAccessIssue: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2024-01-20T12:00:00.000Z"));
+      vi.clearAllMocks();
+
+      mockGetLabelAddedTime = vi.fn();
+      mockIssues = { getLabelAddedTime: mockGetLabelAddedTime };
+      transitionFn = vi.fn().mockResolvedValue(undefined);
+      onAccessIssue = vi.fn();
     });
 
-    it("should not transition when elapsed time is less than duration", () => {
-      const durationMs = 5 * 60 * 1000; // 5 minutes
-      const labeledAt = new Date(Date.now() - 2 * 60 * 1000); // 2 minutes ago
-      const elapsed = Date.now() - labeledAt.getTime();
-
-      expect(elapsed >= durationMs).toBe(false);
+    afterEach(() => {
+      vi.useRealTimers();
     });
 
-    it("should calculate remaining time correctly", () => {
-      const durationMs = 10 * 60 * 1000; // 10 minutes
-      const labeledAt = new Date(Date.now() - 4 * 60 * 1000); // 4 minutes ago
-      const elapsed = Date.now() - labeledAt.getTime();
-      const remainingMinutes = Math.ceil((durationMs - elapsed) / 60000);
+    it("should call transitionFn when elapsed time exceeds duration", async () => {
+      mockGetLabelAddedTime.mockResolvedValue(new Date(Date.now() - 10 * 60 * 1000));
 
-      expect(remainingMinutes).toBe(6);
-    });
-  });
+      await processIssuePhase(
+        mockIssues as any, {} as any, ref, labelName, durationMs, phaseName, transitionFn
+      );
 
-  describe("pull request filtering", () => {
-    it("should identify pull requests by pull_request property", () => {
-      const issue = { number: 1, title: "Test issue" };
-      const pullRequest = { number: 2, title: "Test PR", pull_request: { url: "..." } };
-
-      // Issues don't have pull_request property
-      expect('pull_request' in issue).toBe(false);
-      // PRs have pull_request property
-      expect('pull_request' in pullRequest).toBe(true);
+      expect(transitionFn).toHaveBeenCalledTimes(1);
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.stringContaining("Transitioning #42")
+      );
     });
 
-    it("should skip items with pull_request property", () => {
-      const items = [
-        { number: 1, title: "Issue 1" },
-        { number: 2, title: "PR 1", pull_request: { url: "..." } },
-        { number: 3, title: "Issue 2" },
-        { number: 4, title: "PR 2", pull_request: { url: "..." } },
-      ];
+    it("should not transition when elapsed time is less than duration", async () => {
+      mockGetLabelAddedTime.mockResolvedValue(new Date(Date.now() - 2 * 60 * 1000));
 
-      const processedIssues: number[] = [];
-      for (const item of items) {
-        if ('pull_request' in item) {
-          continue;
-        }
-        processedIssues.push(item.number);
-      }
+      await processIssuePhase(
+        mockIssues as any, {} as any, ref, labelName, durationMs, phaseName, transitionFn
+      );
 
-      expect(processedIssues).toEqual([1, 3]);
-    });
-  });
-
-  describe("environment validation", () => {
-    it("should require APP_ID", () => {
-      const appId = undefined;
-      const privateKey = "test-key";
-
-      expect(!appId || !privateKey).toBe(true);
+      expect(transitionFn).not.toHaveBeenCalled();
+      expect(logger.debug).toHaveBeenCalledWith(
+        expect.stringContaining("remaining in discussion")
+      );
     });
 
-    it("should require APP_PRIVATE_KEY", () => {
-      const appId = "123";
-      const privateKey = undefined;
+    it("should log remaining time in minutes and seconds", async () => {
+      // 2 minutes elapsed → 3m 0s remaining
+      mockGetLabelAddedTime.mockResolvedValue(new Date(Date.now() - 2 * 60 * 1000));
 
-      expect(!appId || !privateKey).toBe(true);
+      await processIssuePhase(
+        mockIssues as any, {} as any, ref, labelName, durationMs, phaseName, transitionFn
+      );
+
+      expect(logger.debug).toHaveBeenCalledWith(
+        expect.stringMatching(/3m 0s remaining/)
+      );
     });
 
-    it("should pass validation when both are provided", () => {
-      const appId = "123";
-      const privateKey = "test-key";
+    it("should return early when label time cannot be determined", async () => {
+      mockGetLabelAddedTime.mockResolvedValue(null);
 
-      expect(!appId || !privateKey).toBe(false);
+      await processIssuePhase(
+        mockIssues as any, {} as any, ref, labelName, durationMs, phaseName, transitionFn
+      );
+
+      expect(transitionFn).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("Could not determine")
+      );
+    });
+
+    it("should run earlyCheck when provided and elapsed < duration", async () => {
+      mockGetLabelAddedTime.mockResolvedValue(new Date(Date.now() - 2 * 60 * 1000));
+      const earlyCheck = vi.fn().mockResolvedValue(true);
+
+      await processIssuePhase(
+        mockIssues as any, {} as any, ref, labelName, durationMs, phaseName,
+        transitionFn, onAccessIssue, earlyCheck
+      );
+
+      expect(earlyCheck).toHaveBeenCalledWith(ref, expect.any(Number));
+      expect(transitionFn).not.toHaveBeenCalled();
+    });
+
+    it("should skip earlyCheck when elapsed >= duration", async () => {
+      mockGetLabelAddedTime.mockResolvedValue(new Date(Date.now() - 10 * 60 * 1000));
+      const earlyCheck = vi.fn().mockResolvedValue(true);
+
+      await processIssuePhase(
+        mockIssues as any, {} as any, ref, labelName, durationMs, phaseName,
+        transitionFn, onAccessIssue, earlyCheck
+      );
+
+      expect(earlyCheck).not.toHaveBeenCalled();
+      expect(transitionFn).toHaveBeenCalledTimes(1);
+    });
+
+    it("should fall through to timer when earlyCheck returns false", async () => {
+      mockGetLabelAddedTime.mockResolvedValue(new Date(Date.now() - 2 * 60 * 1000));
+      const earlyCheck = vi.fn().mockResolvedValue(false);
+
+      await processIssuePhase(
+        mockIssues as any, {} as any, ref, labelName, durationMs, phaseName,
+        transitionFn, onAccessIssue, earlyCheck
+      );
+
+      expect(earlyCheck).toHaveBeenCalled();
+      expect(transitionFn).not.toHaveBeenCalled();
+      expect(logger.debug).toHaveBeenCalledWith(
+        expect.stringContaining("remaining in discussion")
+      );
+    });
+
+    it("should handle 404 errors gracefully (deleted issue)", async () => {
+      mockGetLabelAddedTime.mockRejectedValue(
+        Object.assign(new Error("Not Found"), { status: 404 })
+      );
+
+      await processIssuePhase(
+        mockIssues as any, {} as any, ref, labelName, durationMs, phaseName, transitionFn
+      );
+
+      expect(transitionFn).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("not found")
+      );
+    });
+
+    it("should handle 410 errors gracefully (gone issue)", async () => {
+      mockGetLabelAddedTime.mockRejectedValue(
+        Object.assign(new Error("Gone"), { status: 410 })
+      );
+
+      await processIssuePhase(
+        mockIssues as any, {} as any, ref, labelName, durationMs, phaseName, transitionFn
+      );
+
+      expect(transitionFn).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("not found")
+      );
+    });
+
+    it("should report rate-limited issues via onAccessIssue", async () => {
+      // Bare 429 is not retryable by withRetry, but caught by processIssuePhase
+      mockGetLabelAddedTime.mockRejectedValue(
+        Object.assign(new Error("Too Many Requests"), { status: 429 })
+      );
+
+      await processIssuePhase(
+        mockIssues as any, {} as any, ref, labelName, durationMs, phaseName,
+        transitionFn, onAccessIssue
+      );
+
+      expect(onAccessIssue).toHaveBeenCalledWith(ref, 429, "rate_limit");
+      expect(transitionFn).not.toHaveBeenCalled();
+    });
+
+    it("should report forbidden issues via onAccessIssue", async () => {
+      // Bare 403 without rate-limit indicators → classified as forbidden
+      mockGetLabelAddedTime.mockRejectedValue(
+        Object.assign(new Error("Forbidden"), { status: 403 })
+      );
+
+      await processIssuePhase(
+        mockIssues as any, {} as any, ref, labelName, durationMs, phaseName,
+        transitionFn, onAccessIssue
+      );
+
+      expect(onAccessIssue).toHaveBeenCalledWith(ref, 403, "forbidden");
+      expect(transitionFn).not.toHaveBeenCalled();
+    });
+
+    it("should not call onAccessIssue when it is not provided", async () => {
+      mockGetLabelAddedTime.mockRejectedValue(
+        Object.assign(new Error("Forbidden"), { status: 403 })
+      );
+
+      // Should not throw even without onAccessIssue callback
+      await processIssuePhase(
+        mockIssues as any, {} as any, ref, labelName, durationMs, phaseName, transitionFn
+      );
+
+      expect(transitionFn).not.toHaveBeenCalled();
+    });
+
+    it("should rethrow unexpected errors", async () => {
+      mockGetLabelAddedTime.mockRejectedValue(
+        Object.assign(new Error("Internal Server Error"), { status: 500 })
+      );
+
+      await expect(
+        processIssuePhase(
+          mockIssues as any, {} as any, ref, labelName, durationMs, phaseName, transitionFn
+        )
+      ).rejects.toThrow("Internal Server Error");
     });
   });
 
