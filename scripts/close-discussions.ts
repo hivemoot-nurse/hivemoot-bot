@@ -138,6 +138,106 @@ export async function withRetry<T>(
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
+// Early Decision Check Factory
+// ───────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Dependencies required by the early decision check.
+ */
+export interface EarlyDecisionDeps {
+  /** Early exits to evaluate (all except deadline) */
+  earlyExits: import("../api/lib/repo-config.js").VotingExit[];
+  /** Find the voting comment ID for an issue */
+  findVotingCommentId: (ref: IssueRef) => Promise<number | null>;
+  /** Get validated vote counts from a voting comment */
+  getValidatedVoteCounts: (
+    ref: IssueRef,
+    commentId: number
+  ) => Promise<import("../api/lib/types.js").ValidatedVoteResult>;
+  /** Base options for ending voting */
+  votingEndOptions: import("../api/lib/governance.js").EndVotingOptions;
+  /** Callback to track outcome */
+  trackOutcome: (outcome: VotingOutcome, issueNumber: number) => void;
+  /** Callback to notify PRs on ready-to-implement */
+  notifyPRs: (issueNumber: number) => Promise<void>;
+}
+
+/**
+ * Factory for early decision checks using exit evaluation.
+ * Returns a function that checks if voting can close early, or undefined
+ * if there are no early exits configured.
+ *
+ * Exits are evaluated first-match-wins among those whose time gate
+ * has elapsed. Each exit is self-contained with its own minVoters,
+ * requiredVoters, and requires condition.
+ *
+ * @param resolveFn - The resolution function to call (endVoting or resolveInconclusive)
+ * @param deps - Dependencies for the check
+ * @returns Early check function, or undefined if no early exits
+ */
+export function makeEarlyDecisionCheck(
+  resolveFn: (ref: IssueRef, options?: import("../api/lib/governance.js").EndVotingOptions) => Promise<VotingOutcome>,
+  deps: EarlyDecisionDeps
+): ((ref: IssueRef, elapsed: number) => Promise<boolean>) | undefined {
+  const { earlyExits, findVotingCommentId, getValidatedVoteCounts, votingEndOptions, trackOutcome, notifyPRs } = deps;
+
+  if (earlyExits.length === 0) {
+    return undefined;
+  }
+
+  return async (ref: IssueRef, elapsed: number): Promise<boolean> => {
+    try {
+      // Find exits whose time gate has elapsed
+      const eligible = earlyExits.filter(e => elapsed >= e.afterMs);
+      if (eligible.length === 0) return false;
+
+      const commentId = await findVotingCommentId(ref);
+      if (!commentId) return false;
+
+      const validated = await getValidatedVoteCounts(ref, commentId);
+
+      // Try each eligible exit (first match wins)
+      for (const exit of eligible) {
+        if (!isExitEligible(exit, validated)) continue;
+
+        // All conditions met — close early
+        logger.info(
+          `Early decision for #${ref.issueNumber}: exit(after=${exit.afterMs}ms, ` +
+          `requires=${exit.requires}), ${validated.voters.length} valid voters`
+        );
+
+        const outcome = await resolveFn(ref, {
+          ...votingEndOptions,
+          earlyDecision: true,
+          votingConfig: {
+            minVoters: exit.minVoters,
+            requiredVoters: exit.requiredVoters,
+          },
+          validatedVotes: validated,
+        });
+        trackOutcome(outcome, ref.issueNumber);
+        if (outcome === "phase:ready-to-implement") {
+          await notifyPRs(ref.issueNumber);
+        }
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      // Early decision is an optimization — if it fails, the normal
+      // timer-based path will handle this issue when the voting period
+      // expires. Returning false defers to that safer path.
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorName = error instanceof Error ? error.constructor.name : typeof error;
+      logger.warn(
+        `Early decision check failed for #${ref.issueNumber} [${errorName}]: ${errorMessage}. Deferring to normal timer.`
+      );
+      return false;
+    }
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
 // Issue Processing
 // ───────────────────────────────────────────────────────────────────────────────
 
@@ -422,68 +522,15 @@ async function processRepository(
       }
     };
 
-    /**
-     * Early decision check for voting phase using exit evaluation.
-     * Returns true if voting was closed early, false to continue waiting.
-     *
-     * Exits are evaluated first-match-wins among those whose time gate
-     * has elapsed. Each exit is self-contained with its own minVoters,
-     * requiredVoters, and requires condition.
-     */
-    const earlyExits = voting.exits.slice(0, -1); // all except deadline
-
-    const earlyDecisionCheck = earlyExits.length > 0
-      ? async (ref: IssueRef, elapsed: number): Promise<boolean> => {
-          try {
-            // Find exits whose time gate has elapsed
-            const eligible = earlyExits.filter(e => elapsed >= e.afterMs);
-            if (eligible.length === 0) return false;
-
-            const commentId = await issues.findVotingCommentId(ref);
-            if (!commentId) return false;
-
-            const validated = await issues.getValidatedVoteCounts(ref, commentId);
-
-            // Try each eligible exit (first match wins)
-            for (const exit of eligible) {
-              if (!isExitEligible(exit, validated)) continue;
-
-              // All conditions met — close early
-              logger.info(
-                `Early decision for #${ref.issueNumber}: exit(after=${exit.afterMs}ms, ` +
-                `requires=${exit.requires}), ${validated.voters.length} valid voters`
-              );
-
-              const outcome = await governance.endVoting(ref, {
-                ...votingEndOptions,
-                earlyDecision: true,
-                votingConfig: {
-                  minVoters: exit.minVoters,
-                  requiredVoters: exit.requiredVoters,
-                },
-                validatedVotes: validated,
-              });
-              trackOutcome(outcome, ref.issueNumber);
-              if (outcome === "phase:ready-to-implement") {
-                await notifyPendingPRs(octokit, appId, owner, repoName, ref.issueNumber);
-              }
-              return true;
-            }
-
-            return false;
-          } catch (error) {
-            // Early decision is an optimization — if it fails, the normal
-            // timer-based path will handle this issue when the voting period
-            // expires. Returning false defers to that safer path.
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            const errorName = error instanceof Error ? error.constructor.name : typeof error;
-            logger.warn(
-              `Early decision check failed for #${ref.issueNumber} [${errorName}]: ${errorMessage}. Deferring to normal timer.`
-            );
-            return false;
-          }
-        }
-      : undefined;
+    // Early decision check dependencies (shared between voting and inconclusive phases)
+    const earlyDecisionDeps: EarlyDecisionDeps = {
+      earlyExits: voting.exits.slice(0, -1), // all except deadline
+      findVotingCommentId: (ref) => issues.findVotingCommentId(ref),
+      getValidatedVoteCounts: (ref, commentId) => issues.getValidatedVoteCounts(ref, commentId),
+      votingEndOptions,
+      trackOutcome,
+      notifyPRs: (issueNumber) => notifyPendingPRs(octokit, appId, owner, repoName, issueNumber),
+    };
 
     const phases: PhaseConfig[] = [
       {
@@ -497,13 +544,14 @@ async function processRepository(
         durationMs: voting.durationMs,
         phaseName: "voting",
         transition: votingTransition((ref, opts) => governance.endVoting(ref, opts)),
-        earlyCheck: earlyDecisionCheck,
+        earlyCheck: makeEarlyDecisionCheck((ref, opts) => governance.endVoting(ref, opts), earlyDecisionDeps),
       },
       {
         label: LABELS.INCONCLUSIVE,
         durationMs: voting.durationMs,
         phaseName: "extended voting",
         transition: votingTransition((ref, opts) => governance.resolveInconclusive(ref, opts)),
+        earlyCheck: makeEarlyDecisionCheck((ref, opts) => governance.resolveInconclusive(ref, opts), earlyDecisionDeps),
       },
     ];
 

@@ -56,9 +56,12 @@ vi.mock("../api/lib/env-validation.js", () => ({
 }));
 
 // Import after all mocks are in place
-import { notifyPendingPRs, isRetryableError, withRetry } from "./close-discussions.js";
+import { notifyPendingPRs, isRetryableError, withRetry, makeEarlyDecisionCheck } from "./close-discussions.js";
+import type { EarlyDecisionDeps } from "./close-discussions.js";
 import { getOpenPRsForIssue, logger } from "../api/lib/index.js";
 import { PR_MESSAGES } from "../api/config.js";
+import type { VotingOutcome, IssueRef, ValidatedVoteResult } from "../api/lib/index.js";
+import type { VotingExit } from "../api/lib/repo-config.js";
 
 const mockGetOpenPRsForIssue = vi.mocked(getOpenPRsForIssue);
 
@@ -385,6 +388,148 @@ describe("close-discussions script", () => {
 
       expect(logger.warn).toHaveBeenCalledWith(
         expect.stringMatching(/Attempt 1 failed, retrying in \d+ms: Timeout/)
+      );
+    });
+  });
+
+  describe("makeEarlyDecisionCheck", () => {
+    const testRef: IssueRef = { owner: "test-org", repo: "test-repo", issueNumber: 42 };
+
+    const createMockDeps = (overrides: Partial<EarlyDecisionDeps> = {}): EarlyDecisionDeps => ({
+      earlyExits: [
+        {
+          afterMs: 15 * 60 * 1000, // 15 minutes
+          minVoters: 2,
+          requiredVoters: { mode: "all", voters: ["agent-a", "agent-b"] },
+          requires: "majority",
+        },
+      ],
+      findVotingCommentId: vi.fn().mockResolvedValue(123),
+      getValidatedVoteCounts: vi.fn().mockResolvedValue({
+        votes: { thumbsUp: 2, thumbsDown: 0, confused: 0 },
+        voters: ["agent-a", "agent-b"],
+        participants: ["agent-a", "agent-b"],
+      } as ValidatedVoteResult),
+      votingEndOptions: { votingConfig: { minVoters: 1, requiredVoters: { mode: "all", voters: [] } } },
+      trackOutcome: vi.fn(),
+      notifyPRs: vi.fn().mockResolvedValue(undefined),
+      ...overrides,
+    });
+
+    it("should return undefined when no early exits configured", () => {
+      const deps = createMockDeps({ earlyExits: [] });
+      const resolveFn = vi.fn();
+
+      const check = makeEarlyDecisionCheck(resolveFn, deps);
+
+      expect(check).toBeUndefined();
+    });
+
+    it("should return false when elapsed time has not reached any exit gate", async () => {
+      const deps = createMockDeps();
+      const resolveFn = vi.fn();
+
+      const check = makeEarlyDecisionCheck(resolveFn, deps);
+      const result = await check!(testRef, 5 * 60 * 1000); // 5 minutes (before 15 min gate)
+
+      expect(result).toBe(false);
+      expect(resolveFn).not.toHaveBeenCalled();
+    });
+
+    it("should return false when voting comment not found", async () => {
+      const deps = createMockDeps({
+        findVotingCommentId: vi.fn().mockResolvedValue(null),
+      });
+      const resolveFn = vi.fn();
+
+      const check = makeEarlyDecisionCheck(resolveFn, deps);
+      const result = await check!(testRef, 20 * 60 * 1000); // 20 minutes (after 15 min gate)
+
+      expect(result).toBe(false);
+      expect(resolveFn).not.toHaveBeenCalled();
+    });
+
+    it("should call the provided resolution function when exit conditions are met", async () => {
+      const deps = createMockDeps();
+      const resolveFn = vi.fn().mockResolvedValue("phase:ready-to-implement" as VotingOutcome);
+
+      const check = makeEarlyDecisionCheck(resolveFn, deps);
+      const result = await check!(testRef, 20 * 60 * 1000); // 20 minutes
+
+      expect(result).toBe(true);
+      expect(resolveFn).toHaveBeenCalledWith(testRef, expect.objectContaining({
+        earlyDecision: true,
+        votingConfig: {
+          minVoters: 2,
+          requiredVoters: { mode: "all", voters: ["agent-a", "agent-b"] },
+        },
+      }));
+    });
+
+    it("should call trackOutcome with the resolution result", async () => {
+      const trackOutcome = vi.fn();
+      const deps = createMockDeps({ trackOutcome });
+      const resolveFn = vi.fn().mockResolvedValue("phase:ready-to-implement" as VotingOutcome);
+
+      const check = makeEarlyDecisionCheck(resolveFn, deps);
+      await check!(testRef, 20 * 60 * 1000);
+
+      expect(trackOutcome).toHaveBeenCalledWith("phase:ready-to-implement", 42);
+    });
+
+    it("should call notifyPRs when outcome is ready-to-implement", async () => {
+      const notifyPRs = vi.fn().mockResolvedValue(undefined);
+      const deps = createMockDeps({ notifyPRs });
+      const resolveFn = vi.fn().mockResolvedValue("phase:ready-to-implement" as VotingOutcome);
+
+      const check = makeEarlyDecisionCheck(resolveFn, deps);
+      await check!(testRef, 20 * 60 * 1000);
+
+      expect(notifyPRs).toHaveBeenCalledWith(42);
+    });
+
+    it("should not call notifyPRs when outcome is not ready-to-implement", async () => {
+      const notifyPRs = vi.fn().mockResolvedValue(undefined);
+      const deps = createMockDeps({ notifyPRs });
+      const resolveFn = vi.fn().mockResolvedValue("inconclusive" as VotingOutcome);
+
+      const check = makeEarlyDecisionCheck(resolveFn, deps);
+      await check!(testRef, 20 * 60 * 1000);
+
+      expect(notifyPRs).not.toHaveBeenCalled();
+    });
+
+    it("should use the correct resolution function for each phase", async () => {
+      // This test verifies the key fix: different phases can use different resolution functions
+      const endVotingFn = vi.fn().mockResolvedValue("phase:ready-to-implement" as VotingOutcome);
+      const resolveInconclusiveFn = vi.fn().mockResolvedValue("phase:ready-to-implement" as VotingOutcome);
+
+      const votingDeps = createMockDeps();
+      const inconclusiveDeps = createMockDeps();
+
+      // Simulate voting phase using endVoting
+      const votingCheck = makeEarlyDecisionCheck(endVotingFn, votingDeps);
+      await votingCheck!(testRef, 20 * 60 * 1000);
+
+      // Simulate inconclusive phase using resolveInconclusive
+      const inconclusiveCheck = makeEarlyDecisionCheck(resolveInconclusiveFn, inconclusiveDeps);
+      await inconclusiveCheck!(testRef, 20 * 60 * 1000);
+
+      // Each should have been called with its own resolution function
+      expect(endVotingFn).toHaveBeenCalledTimes(1);
+      expect(resolveInconclusiveFn).toHaveBeenCalledTimes(1);
+    });
+
+    it("should return false and log warning when resolution throws", async () => {
+      const deps = createMockDeps();
+      const resolveFn = vi.fn().mockRejectedValue(new Error("API failure"));
+
+      const check = makeEarlyDecisionCheck(resolveFn, deps);
+      const result = await check!(testRef, 20 * 60 * 1000);
+
+      expect(result).toBe(false);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("Early decision check failed")
       );
     });
   });
