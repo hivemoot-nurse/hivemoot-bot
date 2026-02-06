@@ -133,36 +133,13 @@ governance:
         expect(config.governance.pr.maxPRsPerIssue).toBe(3);
       });
 
-      it("should default to single exit when exits not specified", async () => {
-        const configYaml = `
-governance:
-  proposals:
-    voting:
-      minVoters: 2
-`;
-        const octokit = createMockOctokit({
-          data: {
-            type: "file",
-            content: encodeBase64(configYaml),
-            encoding: "base64",
-          },
-        });
-
-        const config = await loadRepositoryConfig(octokit, "owner", "repo");
-
-        expect(config.governance.proposals.voting.exits).toHaveLength(1);
-        expect(config.governance.proposals.voting.exits[0].requires).toBe("majority");
-        // Top-level minVoters should be inherited into the default exit
-        expect(config.governance.proposals.voting.exits[0].minVoters).toBe(2);
-        expect(config.governance.proposals.voting.durationMs).toBe(defaultDurationMs);
-      });
-
       it("should default requiredVoters to mode:all, voters:[] when not specified", async () => {
         const configYaml = `
 governance:
   proposals:
     voting:
-      minVoters: 2
+      exits:
+        - afterMinutes: 60
 `;
         const octokit = createMockOctokit({
           data: {
@@ -178,15 +155,17 @@ governance:
         expect(config.governance.proposals.voting.exits[0].requiredVoters).toEqual({ mode: "all", voters: [] });
       });
 
-      it("should parse requiredVoters with mode: any (inherited into exits)", async () => {
+      it("should parse requiredVoters with mode: any in exit", async () => {
         const configYaml = `
 governance:
   proposals:
     voting:
-      requiredVoters:
-        mode: any
-        voters:
-          - alice
+      exits:
+        - afterMinutes: 60
+          requiredVoters:
+            mode: any
+            voters:
+              - alice
 `;
         const octokit = createMockOctokit({
           data: {
@@ -198,7 +177,6 @@ governance:
 
         const config = await loadRepositoryConfig(octokit, "owner", "repo");
 
-        // Top-level requiredVoters inherited into the default exit
         expect(config.governance.proposals.voting.exits[0].requiredVoters).toEqual({
           mode: "any",
           voters: ["alice"],
@@ -210,10 +188,12 @@ governance:
 governance:
   proposals:
     voting:
-      requiredVoters:
-        mode: invalid
-        voters:
-          - alice
+      exits:
+        - afterMinutes: 60
+          requiredVoters:
+            mode: invalid
+            voters:
+              - alice
 `;
         const octokit = createMockOctokit({
           data: {
@@ -233,9 +213,11 @@ governance:
 governance:
   proposals:
     voting:
-      requiredVoters:
-        voters:
-          - alice
+      exits:
+        - afterMinutes: 60
+          requiredVoters:
+            voters:
+              - alice
 `;
         const octokit = createMockOctokit({
           data: {
@@ -256,9 +238,11 @@ governance:
 governance:
   proposals:
     voting:
-      requiredVoters:
-        - seed-scout
-        - seed-worker
+      exits:
+        - afterMinutes: 60
+          requiredVoters:
+            - seed-scout
+            - seed-worker
 `;
         const octokit = createMockOctokit({
           data: {
@@ -281,12 +265,14 @@ governance:
 governance:
   proposals:
     voting:
-      requiredVoters:
-        mode: all
-        voters:
-          - Seed-Scout
-          - seed-scout
-          - SEED-WORKER
+      exits:
+        - afterMinutes: 60
+          requiredVoters:
+            mode: all
+            voters:
+              - Seed-Scout
+              - seed-scout
+              - SEED-WORKER
 `;
         const octokit = createMockOctokit({
           data: {
@@ -306,10 +292,12 @@ governance:
 governance:
   proposals:
     voting:
-      requiredVoters:
-        voters:
-          - "@seed-scout"
-          - "@Seed-Worker"
+      exits:
+        - afterMinutes: 60
+          requiredVoters:
+            voters:
+              - "@seed-scout"
+              - "@Seed-Worker"
 `;
         const octokit = createMockOctokit({
           data: {
@@ -329,10 +317,12 @@ governance:
 governance:
   proposals:
     voting:
-      requiredVoters:
-        voters:
-          - "  seed-scout  "
-          - "seed-worker "
+      exits:
+        - afterMinutes: 60
+          requiredVoters:
+            voters:
+              - "  seed-scout  "
+              - "seed-worker "
 `;
         const octokit = createMockOctokit({
           data: {
@@ -352,11 +342,13 @@ governance:
 governance:
   proposals:
     voting:
-      requiredVoters:
-        voters:
-          - "@"
-          - "  "
-          - valid-user
+      exits:
+        - afterMinutes: 60
+          requiredVoters:
+            voters:
+              - "@"
+              - "  "
+              - valid-user
 `;
         const octokit = createMockOctokit({
           data: {
@@ -376,13 +368,15 @@ governance:
 governance:
   proposals:
     voting:
-      requiredVoters:
-        voters:
-          - "-bad"
-          - "bad-"
-          - "bad..name"
-          - "valid-user"
-          - "also--bad"
+      exits:
+        - afterMinutes: 60
+          requiredVoters:
+            voters:
+              - "-bad"
+              - "bad-"
+              - "bad..name"
+              - "valid-user"
+              - "also--bad"
 `;
         const octokit = createMockOctokit({
           data: {
@@ -403,10 +397,12 @@ governance:
 governance:
   proposals:
     voting:
-      requiredVoters:
-        voters:
-          - ${tooLong}
-          - valid-user
+      exits:
+        - afterMinutes: 60
+          requiredVoters:
+            voters:
+              - ${tooLong}
+              - valid-user
 `;
         const octokit = createMockOctokit({
           data: {
@@ -426,12 +422,14 @@ governance:
 governance:
   proposals:
     voting:
-      requiredVoters:
-        voters:
-          - valid-user
-          - 123
-          - ""
-          - another-user
+      exits:
+        - afterMinutes: 60
+          requiredVoters:
+            voters:
+              - valid-user
+              - 123
+              - ""
+              - another-user
 `;
         const octokit = createMockOctokit({
           data: {
@@ -446,30 +444,6 @@ governance:
         expect(config.governance.proposals.voting.exits[0].requiredVoters.voters).toEqual(["valid-user", "another-user"]);
       });
 
-      it("should handle requiredVoters without exits", async () => {
-        const configYaml = `
-governance:
-  proposals:
-    voting:
-      requiredVoters:
-        voters:
-          - agent-one
-          - agent-two
-`;
-        const octokit = createMockOctokit({
-          data: {
-            type: "file",
-            content: encodeBase64(configYaml),
-            encoding: "base64",
-          },
-        });
-
-        const config = await loadRepositoryConfig(octokit, "owner", "repo");
-
-        // Default single exit inherits top-level requiredVoters
-        expect(config.governance.proposals.voting.exits).toHaveLength(1);
-        expect(config.governance.proposals.voting.exits[0].requiredVoters.voters).toEqual(["agent-one", "agent-two"]);
-      });
     });
 
     describe("exits parsing", () => {
@@ -858,7 +832,9 @@ governance:
 governance:
   proposals:
     voting:
-      requiredVoters: "not-valid"
+      exits:
+        - afterMinutes: 60
+          requiredVoters: "not-valid"
 `;
         const octokit = createMockOctokit({
           data: {
@@ -953,26 +929,6 @@ governance:
         const config = await loadRepositoryConfig(octokit, "owner", "repo");
 
         expect(config.governance.pr.maxPRsPerIssue).toBe(CONFIG_BOUNDS.maxPRsPerIssue.max);
-      });
-
-      it("should clamp minVoters to boundaries (top-level inherited into exit)", async () => {
-        const configYaml = `
-governance:
-  proposals:
-    voting:
-      minVoters: 100
-`;
-        const octokit = createMockOctokit({
-          data: {
-            type: "file",
-            content: encodeBase64(configYaml),
-            encoding: "base64",
-          },
-        });
-
-        const config = await loadRepositoryConfig(octokit, "owner", "repo");
-
-        expect(config.governance.proposals.voting.exits[0].minVoters).toBe(CONFIG_BOUNDS.voting.minVoters.max);
       });
 
       it("should allow values at exact boundaries", async () => {

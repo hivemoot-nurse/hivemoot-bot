@@ -50,8 +50,6 @@ export interface RepoConfigFile {
         durationMinutes?: number;
       };
       voting?: {
-        minVoters?: number;
-        requiredVoters?: unknown;
         exits?: unknown[];
       };
     };
@@ -338,15 +336,14 @@ const VALID_REQUIRES: ExitRequires[] = ["majority", "unanimous"];
  *
  * Sorted ascending by afterMs. Must have at least one entry.
  *
- * `defaultMinVoters` and `defaultRequiredVoters` are inherited from top-level
- * voting config for exits that don't specify their own.
  */
 function parseExits(
   value: unknown,
   repoFullName: string,
-  defaultMinVoters: number = CONFIG_BOUNDS.voting.minVoters.default,
-  defaultRequiredVoters: RequiredVotersConfig = { mode: "all", voters: [] },
 ): VotingExit[] {
+  const defaultMinVoters = CONFIG_BOUNDS.voting.minVoters.default;
+  const defaultRequiredVoters: RequiredVotersConfig = { mode: "all", voters: [] };
+
   const defaultExit: VotingExit = {
     afterMs: VOTING_DURATION_MS,
     requires: "majority",
@@ -413,12 +410,12 @@ function parseExits(
         }
       }
 
-      // Parse per-exit minVoters (falls back to inherited default)
+      // Parse minVoters (falls back to CONFIG_BOUNDS default)
       const minVoters = (entry.minVoters !== undefined && entry.minVoters !== null)
         ? parseIntValue(entry.minVoters, MIN_VOTERS_BOUNDS, "exit.minVoters", repoFullName)
         : defaultMinVoters;
 
-      // Parse per-exit requiredVoters (falls back to inherited default)
+      // Parse requiredVoters (falls back to mode:all, voters:[])
       const requiredVoters = (entry.requiredVoters !== undefined && entry.requiredVoters !== null)
         ? parseRequiredVotersConfig(entry.requiredVoters, repoFullName)
         : defaultRequiredVoters;
@@ -455,31 +452,10 @@ function parseRepoConfig(raw: unknown, repoFullName: string): EffectiveConfig {
   // Resolve PR settings
   const prConfig = config?.governance?.pr;
 
-  // Voting-specific settings (only in new format)
-  const votingConfig = config?.governance?.proposals?.voting;
-
-  // Parse top-level minVoters/requiredVoters as defaults for exits that don't
-  // specify their own.
-  const topLevelMinVoters = parseIntValue(
-    votingConfig?.minVoters,
-    MIN_VOTERS_BOUNDS,
-    "governance.proposals.voting.minVoters",
-    repoFullName
-  );
-  const topLevelRequiredVoters = parseRequiredVotersConfig(
-    votingConfig?.requiredVoters,
-    repoFullName
-  );
-
   // Exits (default applied if missing)
-  const exitsRaw = votingConfig?.exits;
+  const exitsRaw = config?.governance?.proposals?.voting?.exits;
 
-  const exits = parseExits(
-    exitsRaw,
-    repoFullName,
-    topLevelMinVoters,
-    topLevelRequiredVoters,
-  );
+  const exits = parseExits(exitsRaw, repoFullName);
 
   return {
     version: typeof config?.version === "number" ? config.version : 1,
