@@ -53,7 +53,7 @@ interface RepoContext {
   fullName: string;
 }
 
-type IntakeTrigger = "opened" | "updated";
+type IntakeTrigger = "opened" | "updated" | "edited";
 
 /**
  * Combined client interface for leaderboard recalculation.
@@ -524,6 +524,46 @@ function app(probotApp: Probot): void {
       });
     } catch (error) {
       context.log.error({ err: error, pr: number, repo: fullName }, "Failed to process PR update");
+      throw error;
+    }
+  });
+
+  /**
+   * Handle PR description edits to pick up newly added closing keywords.
+   */
+  probotApp.on("pull_request.edited", async (context) => {
+    // Only body edits can change closing keywords — skip title/base changes
+    if (!context.payload.changes?.body) {
+      return;
+    }
+
+    const { number } = context.payload.pull_request;
+    const { owner, repo, fullName } = getRepoContext(context.payload.repository);
+    context.log.info(`Processing PR edit #${number} in ${fullName}`);
+
+    try {
+      const appId = getAppId();
+      const issues = createIssueOperations(context.octokit, { appId });
+      const prs = createPROperations(context.octokit, { appId });
+      const [linkedIssues, repoConfig] = await Promise.all([
+        getLinkedIssues(context.octokit, owner, repo, number),
+        loadRepositoryConfig(context.octokit, owner, repo),
+      ]);
+
+      await processImplementationIntake({
+        octokit: context.octokit,
+        issues,
+        prs,
+        log: context.log,
+        owner,
+        repo,
+        prNumber: number,
+        linkedIssues,
+        trigger: "edited",
+        maxPRsPerIssue: repoConfig.governance.pr.maxPRsPerIssue,
+      });
+    } catch (error) {
+      context.log.error({ err: error, pr: number, repo: fullName }, "Failed to process PR edit");
       throw error;
     }
   });

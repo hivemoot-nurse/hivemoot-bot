@@ -312,6 +312,190 @@ describe("Queen Bot", () => {
 
       expect(mockOctokit.rest.issues.createComment).toHaveBeenCalled();
     });
+
+    it("should apply implementation label on edited trigger when linked issue is ready", async () => {
+      const mockOctokit = createMockOctokit();
+
+      const readyIssue: LinkedIssue = {
+        number: 7,
+        title: "Ready issue",
+        state: "OPEN",
+        labels: { nodes: [{ name: LABELS.READY_TO_IMPLEMENT }] },
+      };
+
+      vi.mocked(getLinkedIssues).mockResolvedValue([readyIssue]);
+
+      const issues = {
+        getLabelAddedTime: vi.fn().mockResolvedValue(new Date("2026-02-01T00:00:00Z")),
+        comment: vi.fn().mockResolvedValue(undefined),
+      };
+
+      const prs = {
+        get: vi.fn().mockResolvedValue({ createdAt: new Date("2026-02-01T00:00:00Z") }),
+        getLabels: vi.fn().mockResolvedValue([]),
+        getActivationDate: vi.fn().mockResolvedValue(new Date("2026-02-02T00:00:00Z")),
+        findPRsWithLabel: vi.fn().mockResolvedValue([]),
+        addLabels: vi.fn().mockResolvedValue(undefined),
+        comment: vi.fn().mockResolvedValue(undefined),
+      };
+
+      await processImplementationIntake({
+        octokit: mockOctokit,
+        issues,
+        prs,
+        log: { info: vi.fn(), warn: vi.fn() },
+        owner: "hivemoot",
+        repo: "colony",
+        prNumber: 101,
+        linkedIssues: [readyIssue],
+        trigger: "edited",
+        maxPRsPerIssue: 3,
+      });
+
+      expect(prs.addLabels).toHaveBeenCalledWith(
+        { owner: "hivemoot", repo: "colony", prNumber: 101 },
+        [LABELS.IMPLEMENTATION]
+      );
+    });
+
+    it("should not post issue-not-ready comment on edited trigger", async () => {
+      const mockOctokit = createMockOctokit();
+
+      const discussionIssue: LinkedIssue = {
+        number: 7,
+        title: "Discussion issue",
+        state: "OPEN",
+        labels: { nodes: [{ name: LABELS.DISCUSSION }] },
+      };
+
+      const issues = {
+        getLabelAddedTime: vi.fn(),
+        comment: vi.fn().mockResolvedValue(undefined),
+      };
+
+      const prs = {
+        get: vi.fn().mockResolvedValue({ createdAt: new Date("2026-02-01T00:00:00Z") }),
+        getLabels: vi.fn().mockResolvedValue([]),
+        getActivationDate: vi.fn().mockResolvedValue(new Date("2026-02-02T00:00:00Z")),
+        findPRsWithLabel: vi.fn().mockResolvedValue([]),
+        addLabels: vi.fn().mockResolvedValue(undefined),
+        comment: vi.fn().mockResolvedValue(undefined),
+      };
+
+      await processImplementationIntake({
+        octokit: mockOctokit,
+        issues,
+        prs,
+        log: { info: vi.fn(), warn: vi.fn() },
+        owner: "hivemoot",
+        repo: "colony",
+        prNumber: 101,
+        linkedIssues: [discussionIssue],
+        trigger: "edited",
+        maxPRsPerIssue: 3,
+      });
+
+      // "edited" trigger should NOT post the "issue not ready" comment
+      expect(prs.comment).not.toHaveBeenCalled();
+    });
+
+    it("should silently skip when activation is before ready date on edited trigger", async () => {
+      const mockOctokit = createMockOctokit();
+
+      const readyIssue: LinkedIssue = {
+        number: 7,
+        title: "Ready issue",
+        state: "OPEN",
+        labels: { nodes: [{ name: LABELS.READY_TO_IMPLEMENT }] },
+      };
+
+      vi.mocked(getLinkedIssues).mockResolvedValue([readyIssue]);
+
+      const issues = {
+        getLabelAddedTime: vi.fn().mockResolvedValue(new Date("2026-02-05T00:00:00Z")),
+        comment: vi.fn().mockResolvedValue(undefined),
+      };
+
+      const prs = {
+        get: vi.fn().mockResolvedValue({ createdAt: new Date("2026-02-01T00:00:00Z") }),
+        getLabels: vi.fn().mockResolvedValue([]),
+        // Activation BEFORE ready → anti-gaming guard rejects
+        getActivationDate: vi.fn().mockResolvedValue(new Date("2026-02-04T00:00:00Z")),
+        findPRsWithLabel: vi.fn().mockResolvedValue([]),
+        addLabels: vi.fn().mockResolvedValue(undefined),
+        comment: vi.fn().mockResolvedValue(undefined),
+      };
+
+      await processImplementationIntake({
+        octokit: mockOctokit,
+        issues,
+        prs,
+        log: { info: vi.fn(), warn: vi.fn() },
+        owner: "hivemoot",
+        repo: "colony",
+        prNumber: 101,
+        linkedIssues: [readyIssue],
+        trigger: "edited",
+        maxPRsPerIssue: 3,
+      });
+
+      // No label, no comment — silent skip on edited
+      expect(prs.addLabels).not.toHaveBeenCalled();
+      expect(prs.comment).not.toHaveBeenCalled();
+    });
+
+    it("should post no-room comment (not close) when PR limit reached on edited trigger", async () => {
+      const mockOctokit = createMockOctokit();
+
+      const readyIssue: LinkedIssue = {
+        number: 7,
+        title: "Ready issue",
+        state: "OPEN",
+        labels: { nodes: [{ name: LABELS.READY_TO_IMPLEMENT }] },
+      };
+
+      const existingPR = { number: 50, title: "Existing", state: "OPEN" as const, author: { login: "other" } };
+
+      vi.mocked(getLinkedIssues).mockResolvedValue([readyIssue]);
+
+      const issues = {
+        getLabelAddedTime: vi.fn().mockResolvedValue(new Date("2026-02-01T00:00:00Z")),
+        comment: vi.fn().mockResolvedValue(undefined),
+      };
+
+      const prs = {
+        get: vi.fn().mockResolvedValue({
+          createdAt: new Date("2026-02-01T00:00:00Z"),
+          state: "open",
+          merged: false,
+          author: "other",
+        }),
+        getLabels: vi.fn().mockResolvedValue([]),
+        getActivationDate: vi.fn().mockResolvedValue(new Date("2026-02-02T00:00:00Z")),
+        findPRsWithLabel: vi.fn().mockResolvedValue([existingPR]),
+        addLabels: vi.fn().mockResolvedValue(undefined),
+        comment: vi.fn().mockResolvedValue(undefined),
+        close: vi.fn().mockResolvedValue(undefined),
+      };
+
+      await processImplementationIntake({
+        octokit: mockOctokit,
+        issues,
+        prs,
+        log: { info: vi.fn(), warn: vi.fn() },
+        owner: "hivemoot",
+        repo: "colony",
+        prNumber: 101,
+        linkedIssues: [readyIssue],
+        trigger: "edited",
+        maxPRsPerIssue: 1,
+      });
+
+      // Should inform about no room, but NOT close the PR
+      expect(prs.comment).toHaveBeenCalled();
+      expect(prs.close).not.toHaveBeenCalled();
+      expect(prs.addLabels).not.toHaveBeenCalled();
+    });
   });
 
   describe("Leaderboard race condition fix", () => {
