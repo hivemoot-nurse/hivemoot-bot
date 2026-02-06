@@ -196,7 +196,7 @@ describe("Implementation Intake", () => {
     expect(prs.comment).not.toHaveBeenCalled();
   });
 
-  it("should silently skip when activation is before ready date on edited trigger", async () => {
+  it("should silently skip when activation is before ready date on edited trigger without editedAt", async () => {
     const mockOctokit = createMockOctokit();
 
     const readyIssue: LinkedIssue = {
@@ -236,9 +236,152 @@ describe("Implementation Intake", () => {
       maxPRsPerIssue: 3,
     });
 
-    // No label, no comment — silent skip on edited
+    // No label, no comment — silent skip on edited without editedAt
     expect(prs.addLabels).not.toHaveBeenCalled();
     expect(prs.comment).not.toHaveBeenCalled();
+  });
+
+  it("should accept PR when editedAt is after ready date even if activation is before", async () => {
+    const mockOctokit = createMockOctokit();
+
+    const readyIssue: LinkedIssue = {
+      number: 7,
+      title: "Ready issue",
+      state: "OPEN",
+      labels: { nodes: [{ name: LABELS.READY_TO_IMPLEMENT }] },
+    };
+
+    vi.mocked(getLinkedIssues).mockResolvedValue([readyIssue]);
+
+    const issues = {
+      getLabelAddedTime: vi.fn().mockResolvedValue(new Date("2026-02-05T00:00:00Z")),
+      comment: vi.fn().mockResolvedValue(undefined),
+      hasNotificationComment: vi.fn().mockResolvedValue(false),
+    };
+
+    const prs = {
+      get: vi.fn().mockResolvedValue({ createdAt: new Date("2026-02-01T00:00:00Z") }),
+      getLabels: vi.fn().mockResolvedValue([]),
+      // Activation BEFORE ready — but editedAt is AFTER
+      getActivationDate: vi.fn().mockResolvedValue(new Date("2026-02-04T00:00:00Z")),
+      findPRsWithLabel: vi.fn().mockResolvedValue([]),
+      addLabels: vi.fn().mockResolvedValue(undefined),
+      comment: vi.fn().mockResolvedValue(undefined),
+      hasNotificationComment: vi.fn().mockResolvedValue(false),
+    };
+
+    await processImplementationIntake({
+      octokit: mockOctokit,
+      issues,
+      prs,
+      log: { info: vi.fn(), warn: vi.fn() },
+      owner: "hivemoot",
+      repo: "colony",
+      prNumber: 101,
+      linkedIssues: [readyIssue],
+      trigger: "edited",
+      maxPRsPerIssue: 3,
+      editedAt: new Date("2026-02-06T00:00:00Z"),
+    });
+
+    expect(prs.addLabels).toHaveBeenCalledWith(
+      { owner: "hivemoot", repo: "colony", prNumber: 101 },
+      [LABELS.IMPLEMENTATION]
+    );
+  });
+
+  it("should still block when editedAt is also before ready date", async () => {
+    const mockOctokit = createMockOctokit();
+
+    const readyIssue: LinkedIssue = {
+      number: 7,
+      title: "Ready issue",
+      state: "OPEN",
+      labels: { nodes: [{ name: LABELS.READY_TO_IMPLEMENT }] },
+    };
+
+    vi.mocked(getLinkedIssues).mockResolvedValue([readyIssue]);
+
+    const issues = {
+      getLabelAddedTime: vi.fn().mockResolvedValue(new Date("2026-02-05T00:00:00Z")),
+      comment: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const prs = {
+      get: vi.fn().mockResolvedValue({ createdAt: new Date("2026-02-01T00:00:00Z") }),
+      getLabels: vi.fn().mockResolvedValue([]),
+      getActivationDate: vi.fn().mockResolvedValue(new Date("2026-02-03T00:00:00Z")),
+      findPRsWithLabel: vi.fn().mockResolvedValue([]),
+      addLabels: vi.fn().mockResolvedValue(undefined),
+      comment: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await processImplementationIntake({
+      octokit: mockOctokit,
+      issues,
+      prs,
+      log: { info: vi.fn(), warn: vi.fn() },
+      owner: "hivemoot",
+      repo: "colony",
+      prNumber: 101,
+      linkedIssues: [readyIssue],
+      trigger: "edited",
+      maxPRsPerIssue: 3,
+      editedAt: new Date("2026-02-04T00:00:00Z"),
+    });
+
+    // Both activation and editedAt are before ready — still blocked
+    expect(prs.addLabels).not.toHaveBeenCalled();
+    expect(prs.comment).not.toHaveBeenCalled();
+  });
+
+  it("should accept PR when editedAt equals ready date exactly", async () => {
+    const mockOctokit = createMockOctokit();
+
+    const readyIssue: LinkedIssue = {
+      number: 7,
+      title: "Ready issue",
+      state: "OPEN",
+      labels: { nodes: [{ name: LABELS.READY_TO_IMPLEMENT }] },
+    };
+
+    vi.mocked(getLinkedIssues).mockResolvedValue([readyIssue]);
+
+    const issues = {
+      getLabelAddedTime: vi.fn().mockResolvedValue(new Date("2026-02-05T00:00:00Z")),
+      comment: vi.fn().mockResolvedValue(undefined),
+      hasNotificationComment: vi.fn().mockResolvedValue(false),
+    };
+
+    const prs = {
+      get: vi.fn().mockResolvedValue({ createdAt: new Date("2026-02-01T00:00:00Z") }),
+      getLabels: vi.fn().mockResolvedValue([]),
+      getActivationDate: vi.fn().mockResolvedValue(new Date("2026-02-03T00:00:00Z")),
+      findPRsWithLabel: vi.fn().mockResolvedValue([]),
+      addLabels: vi.fn().mockResolvedValue(undefined),
+      comment: vi.fn().mockResolvedValue(undefined),
+      hasNotificationComment: vi.fn().mockResolvedValue(false),
+    };
+
+    await processImplementationIntake({
+      octokit: mockOctokit,
+      issues,
+      prs,
+      log: { info: vi.fn(), warn: vi.fn() },
+      owner: "hivemoot",
+      repo: "colony",
+      prNumber: 101,
+      linkedIssues: [readyIssue],
+      trigger: "edited",
+      maxPRsPerIssue: 3,
+      editedAt: new Date("2026-02-05T00:00:00Z"),
+    });
+
+    // editedAt === readyAt — >= comparison accepts this
+    expect(prs.addLabels).toHaveBeenCalledWith(
+      { owner: "hivemoot", repo: "colony", prNumber: 101 },
+      [LABELS.IMPLEMENTATION]
+    );
   });
 
   it("should post no-room comment (not close) when PR limit reached on edited trigger", async () => {

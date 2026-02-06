@@ -249,6 +249,8 @@ export async function processImplementationIntake(params: {
   linkedIssues: LinkedIssue[];
   trigger: IntakeTrigger;
   maxPRsPerIssue: number;
+  /** Timestamp of a PR body edit, used as an activation signal by the edited webhook. */
+  editedAt?: Date;
 }): Promise<void> {
   const {
     octokit,
@@ -279,6 +281,10 @@ export async function processImplementationIntake(params: {
   }
 
   const activationDate = await prs.getActivationDate(prRef, prDetails.createdAt);
+  // PR body edits count as activation — the webhook provides the edit timestamp
+  const effectiveActivation = params.editedAt
+    ? new Date(Math.max(activationDate.getTime(), params.editedAt.getTime()))
+    : activationDate;
   const readyIssues = filterByLabel(linkedIssues, LABELS.READY_TO_IMPLEMENT);
   const activeImplementationPRsByIssue =
     readyIssues.length > 0
@@ -311,7 +317,7 @@ export async function processImplementationIntake(params: {
       continue;
     }
 
-    if (!isActivationAfterReady(activationDate, readyAt)) {
+    if (!isActivationAfterReady(effectiveActivation, readyAt)) {
       if (trigger === "opened") {
         await prs.comment(prRef, PR_MESSAGES.issueReadyNeedsUpdate(linkedIssue.number));
       }

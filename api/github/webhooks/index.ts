@@ -191,6 +191,7 @@ function app(probotApp: Probot): void {
         linkedIssues,
         trigger: "edited",
         maxPRsPerIssue: repoConfig.governance.pr.maxPRsPerIssue,
+        editedAt: new Date(context.payload.pull_request.updated_at),
       });
     } catch (error) {
       context.log.error({ err: error, pr: number, repo: fullName }, "Failed to process PR edit");
