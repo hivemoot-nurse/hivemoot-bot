@@ -233,6 +233,14 @@ export function buildVotingComment(content: string, issueNumber: number, cycle: 
 }
 
 /**
+ * Build a complete discussion (welcome) comment with embedded metadata.
+ */
+export function buildDiscussionComment(content: string, issueNumber: number): string {
+  const metadata = createWelcomeMetadata(issueNumber);
+  return `${generateMetadataTag(metadata)}\n${content}`;
+}
+
+/**
  * Build a complete leaderboard comment with embedded metadata.
  */
 export function buildLeaderboardComment(content: string, issueNumber: number): string {

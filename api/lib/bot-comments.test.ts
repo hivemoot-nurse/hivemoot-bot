@@ -12,10 +12,12 @@ import {
   createNotificationMetadata,
   buildVotingComment,
   buildLeaderboardComment,
+  buildDiscussionComment,
   buildHumanHelpComment,
   buildNotificationComment,
   isVotingComment,
   isLeaderboardComment,
+
   isHumanHelpComment,
   isNotificationComment,
   selectCurrentVotingComment,
@@ -745,5 +747,39 @@ describe("round-trip: build → parse", () => {
     expect(parsed?.type).toBe("notification");
     expect((parsed as NotificationMetadata)?.notificationType).toBe(NOTIFICATION_TYPES.VOTING_PASSED);
     expect(parsed?.issueNumber).toBe(42);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Discussion Comment Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("buildDiscussionComment", () => {
+  it("should wrap content with welcome metadata", () => {
+    const content = "# Discussion Phase\n\nWelcome!";
+    const result = buildDiscussionComment(content, 42);
+
+    expect(result).toContain("hivemoot-metadata:");
+    expect(result).toContain('"type":"welcome"');
+    expect(result).toContain('"issueNumber":42');
+    expect(result).toContain(content);
+  });
+
+  it("should place metadata before content", () => {
+    const content = "Test content";
+    const result = buildDiscussionComment(content, 1);
+
+    const metadataIndex = result.indexOf("<!--");
+    const contentIndex = result.indexOf(content);
+    expect(metadataIndex).toBeLessThan(contentIndex);
+  });
+
+  it("should preserve metadata through round-trip parsing", () => {
+    const comment = buildDiscussionComment("Content", 99);
+    const parsed = parseMetadata(comment);
+
+    expect(parsed?.type).toBe("welcome");
+    expect(parsed?.issueNumber).toBe(99);
+    expect(parsed?.version).toBe(1);
   });
 });

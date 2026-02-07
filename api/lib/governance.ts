@@ -12,6 +12,7 @@
 import { LABELS, MESSAGES, SIGNATURE } from "../config.js";
 import {
   buildVotingComment,
+  buildDiscussionComment,
   buildHumanHelpComment,
   SIGNATURES,
   ERROR_CODES,
@@ -20,7 +21,7 @@ import type { IssueOperations } from "./github-client.js";
 import { createModelFromEnv } from "./llm/provider.js";
 import { DiscussionSummarizer, formatVotingMessage } from "./llm/summarizer.js";
 import { logger as defaultLogger, type Logger } from "./logger.js";
-import type { RequiredVotersConfig, RequiredVotersMode, VotingExit, ExitRequires } from "./repo-config.js";
+import type { RequiredVotersConfig, RequiredVotersMode, VotingExit, ExitRequires, DiscussionExit } from "./repo-config.js";
 import type {
   IssueRef,
   VoteCounts,
@@ -124,12 +125,15 @@ export class GovernanceService {
   }
 
   /**
-   * Start the discussion phase for a new issue
+   * Start the discussion phase for a new issue.
+   *
+   * Wraps the welcome message with metadata to enable future comment discovery.
    */
   async startDiscussion(ref: IssueRef): Promise<void> {
+    const commentBody = buildDiscussionComment(MESSAGES.ISSUE_WELCOME, ref.issueNumber);
     await Promise.all([
       this.issues.addLabels(ref, [LABELS.DISCUSSION]),
-      this.issues.comment(ref, MESSAGES.ISSUE_WELCOME),
+      this.issues.comment(ref, commentBody),
     ]);
   }
 
@@ -651,4 +655,31 @@ export function isExitEligible(
     return isUnanimous(validated.votes);
   }
   return isDecisive(validated.votes);
+}
+
+/**
+ * Check whether a discussion exit is eligible based on 👍 readiness reactions.
+ *
+ * Applies quorum (minReady) and required ready users check.
+ * Simpler than isExitEligible — no majority/unanimous distinction.
+ */
+export function isDiscussionExitEligible(
+  exit: DiscussionExit,
+  readyUsers: Set<string>,
+): boolean {
+  if (readyUsers.size < exit.minReady) {
+    return false;
+  }
+
+  const { mode, users } = exit.requiredReady;
+  if (users.length > 0) {
+    if (mode === "all" && !users.every(u => readyUsers.has(u))) {
+      return false;
+    }
+    if (mode === "any" && !users.some(u => readyUsers.has(u))) {
+      return false;
+    }
+  }
+
+  return true;
 }

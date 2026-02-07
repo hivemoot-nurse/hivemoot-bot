@@ -56,11 +56,11 @@ vi.mock("../api/lib/env-validation.js", () => ({
 }));
 
 // Import after all mocks are in place
-import { notifyPendingPRs, isRetryableError, withRetry, makeEarlyDecisionCheck, processIssuePhase } from "./close-discussions.js";
-import type { EarlyDecisionDeps } from "./close-discussions.js";
+import { notifyPendingPRs, isRetryableError, withRetry, makeEarlyDecisionCheck, makeDiscussionEarlyCheck, processIssuePhase } from "./close-discussions.js";
+import type { EarlyDecisionDeps, DiscussionEarlyCheckDeps } from "./close-discussions.js";
 import { getOpenPRsForIssue, logger } from "../api/lib/index.js";
 import { PR_MESSAGES } from "../api/config.js";
-import type { VotingOutcome, IssueRef, ValidatedVoteResult } from "../api/lib/index.js";
+import type { VotingOutcome, IssueRef, ValidatedVoteResult, DiscussionExit } from "../api/lib/index.js";
 import type { VotingExit } from "../api/lib/repo-config.js";
 
 const mockGetOpenPRsForIssue = vi.mocked(getOpenPRsForIssue);
@@ -645,16 +645,171 @@ describe("close-discussions script", () => {
       expect(resolveInconclusiveFn).toHaveBeenCalledTimes(1);
     });
 
-    it("should return false and log warning when resolution throws", async () => {
-      const deps = createMockDeps();
-      const resolveFn = vi.fn().mockRejectedValue(new Error("API failure"));
+    it("should return false and log warning on eligibility check error", async () => {
+      const deps = createMockDeps({
+        getValidatedVoteCounts: vi.fn().mockRejectedValue(new Error("API failure")),
+      });
+      const resolveFn = vi.fn();
 
       const check = makeEarlyDecisionCheck(resolveFn, deps);
       const result = await check!(testRef, 20 * 60 * 1000);
 
       expect(result).toBe(false);
+      expect(resolveFn).not.toHaveBeenCalled();
       expect(logger.warn).toHaveBeenCalledWith(
         expect.stringContaining("Early decision check failed")
+      );
+    });
+
+    it("should propagate resolveFn error instead of swallowing it", async () => {
+      vi.mocked(logger.warn).mockClear();
+      const deps = createMockDeps();
+      const resolveFn = vi.fn().mockRejectedValue(new Error("Transition failed"));
+
+      const check = makeEarlyDecisionCheck(resolveFn, deps);
+
+      await expect(check!(testRef, 20 * 60 * 1000)).rejects.toThrow("Transition failed");
+      // Transition errors must not be caught by the early decision check
+      expect(logger.warn).not.toHaveBeenCalledWith(
+        expect.stringContaining("Early decision check failed")
+      );
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // makeDiscussionEarlyCheck
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  describe("makeDiscussionEarlyCheck", () => {
+    const testRef: IssueRef = { owner: "test-org", repo: "test-repo", issueNumber: 42 };
+    const MS = 60 * 1000;
+
+    function createDiscussionDeps(overrides?: Partial<DiscussionEarlyCheckDeps>): DiscussionEarlyCheckDeps {
+      return {
+        earlyExits: [
+          { afterMs: 30 * MS, minReady: 3, requiredReady: { mode: "all" as const, users: ["alice", "bob"] } },
+        ],
+        getDiscussionReadiness: vi.fn().mockResolvedValue(new Set(["alice", "bob", "charlie"])),
+        ...overrides,
+      };
+    }
+
+    it("should return undefined when no early exits", () => {
+      const deps = createDiscussionDeps({ earlyExits: [] });
+      const transitionFn = vi.fn();
+
+      const check = makeDiscussionEarlyCheck(transitionFn, deps);
+      expect(check).toBeUndefined();
+    });
+
+    it("should return false when elapsed < afterMs for all exits", async () => {
+      const deps = createDiscussionDeps();
+      const transitionFn = vi.fn();
+
+      const check = makeDiscussionEarlyCheck(transitionFn, deps);
+      const result = await check!(testRef, 10 * MS); // only 10 min elapsed, need 30
+
+      expect(result).toBe(false);
+      expect(transitionFn).not.toHaveBeenCalled();
+    });
+
+    it("should return true and call transition when exit matches", async () => {
+      const deps = createDiscussionDeps();
+      const transitionFn = vi.fn().mockResolvedValue(undefined);
+
+      const check = makeDiscussionEarlyCheck(transitionFn, deps);
+      const result = await check!(testRef, 35 * MS); // 35 min elapsed, need 30
+
+      expect(result).toBe(true);
+      expect(transitionFn).toHaveBeenCalledWith(testRef);
+    });
+
+    it("should return false when required users haven't reacted", async () => {
+      const deps = createDiscussionDeps({
+        getDiscussionReadiness: vi.fn().mockResolvedValue(new Set(["alice", "charlie"])), // missing bob
+      });
+      const transitionFn = vi.fn();
+
+      const check = makeDiscussionEarlyCheck(transitionFn, deps);
+      const result = await check!(testRef, 35 * MS);
+
+      expect(result).toBe(false);
+      expect(transitionFn).not.toHaveBeenCalled();
+    });
+
+    it("should return false when minReady not met", async () => {
+      const deps = createDiscussionDeps({
+        getDiscussionReadiness: vi.fn().mockResolvedValue(new Set(["alice", "bob"])), // only 2, need 3
+      });
+      const transitionFn = vi.fn();
+
+      const check = makeDiscussionEarlyCheck(transitionFn, deps);
+      const result = await check!(testRef, 35 * MS);
+
+      expect(result).toBe(false);
+    });
+
+    it("should evaluate first-match-wins across multiple exits", async () => {
+      const deps = createDiscussionDeps({
+        earlyExits: [
+          // First exit: strict requirements (will fail)
+          { afterMs: 15 * MS, minReady: 5, requiredReady: { mode: "all" as const, users: [] } },
+          // Second exit: relaxed requirements (will pass)
+          { afterMs: 30 * MS, minReady: 2, requiredReady: { mode: "all" as const, users: [] } },
+        ],
+        getDiscussionReadiness: vi.fn().mockResolvedValue(new Set(["alice", "bob", "charlie"])),
+      });
+      const transitionFn = vi.fn().mockResolvedValue(undefined);
+
+      const check = makeDiscussionEarlyCheck(transitionFn, deps);
+      const result = await check!(testRef, 35 * MS);
+
+      expect(result).toBe(true);
+      expect(transitionFn).toHaveBeenCalledWith(testRef);
+    });
+
+    it("should work with mode: any for requiredReady", async () => {
+      const deps = createDiscussionDeps({
+        earlyExits: [
+          { afterMs: 30 * MS, minReady: 0, requiredReady: { mode: "any" as const, users: ["alice", "bob"] } },
+        ],
+        getDiscussionReadiness: vi.fn().mockResolvedValue(new Set(["bob"])),
+      });
+      const transitionFn = vi.fn().mockResolvedValue(undefined);
+
+      const check = makeDiscussionEarlyCheck(transitionFn, deps);
+      const result = await check!(testRef, 35 * MS);
+
+      expect(result).toBe(true);
+    });
+
+    it("should return false and log warning on readiness check error", async () => {
+      const deps = createDiscussionDeps({
+        getDiscussionReadiness: vi.fn().mockRejectedValue(new Error("API error")),
+      });
+      const transitionFn = vi.fn();
+
+      const check = makeDiscussionEarlyCheck(transitionFn, deps);
+      const result = await check!(testRef, 35 * MS);
+
+      expect(result).toBe(false);
+      expect(transitionFn).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("Discussion early check failed")
+      );
+    });
+
+    it("should propagate transitionFn error instead of swallowing it", async () => {
+      vi.mocked(logger.warn).mockClear();
+      const deps = createDiscussionDeps();
+      const transitionFn = vi.fn().mockRejectedValue(new Error("Transition failed"));
+
+      const check = makeDiscussionEarlyCheck(transitionFn, deps);
+
+      await expect(check!(testRef, 35 * MS)).rejects.toThrow("Transition failed");
+      // Transition errors must not be caught by the discussion early check
+      expect(logger.warn).not.toHaveBeenCalledWith(
+        expect.stringContaining("Discussion early check failed")
       );
     });
   });

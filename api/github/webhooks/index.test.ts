@@ -46,6 +46,7 @@ describe("Queen Bot", () => {
         },
         reactions: {
           listForIssueComment: vi.fn().mockResolvedValue({ data: [] }),
+          listForIssue: vi.fn().mockResolvedValue({ data: [] }),
         },
       },
       paginate: {
@@ -72,12 +73,11 @@ describe("Queen Bot", () => {
         labels: [LABELS.DISCUSSION],
       });
 
-      expect(mockOctokit.rest.issues.createComment).toHaveBeenCalledWith({
-        owner: "hivemoot",
-        repo: "test-repo",
-        issue_number: 42,
-        body: MESSAGES.ISSUE_WELCOME,
-      });
+      expect(mockOctokit.rest.issues.createComment).toHaveBeenCalledTimes(1);
+      const commentBody = mockOctokit.rest.issues.createComment.mock.calls[0][0].body;
+      expect(commentBody).toContain("hivemoot-metadata:");
+      expect(commentBody).toContain('"type":"welcome"');
+      expect(commentBody).toContain("Discussion Phase");
     });
 
     it("should propagate API errors", async () => {
@@ -110,6 +110,7 @@ describe("Queen Bot", () => {
         },
         reactions: {
           listForIssueComment: vi.fn().mockResolvedValue({ data: [] }),
+          listForIssue: vi.fn().mockResolvedValue({ data: [] }),
         },
       },
       paginate: {

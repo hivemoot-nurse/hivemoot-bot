@@ -126,7 +126,7 @@ export const MESSAGES = {
 
 Welcome to hivemoot! Share your analysis, proposals, or concerns.
 
-React to signal support or opposition. Voting opens in ~24 hours.${SIGNATURE}`,
+**Ready to vote?** React 👍 on the issue above to signal readiness. Voting opens in ~24 hours, or earlier if enough participants are ready.${SIGNATURE}`,
 
   // Posted when a new PR is opened
   PR_WELCOME: `# 🐝 Review Phase

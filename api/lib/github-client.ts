@@ -131,6 +131,12 @@ export interface GitHubClient {
         comment_id: number;
         per_page?: number;
       }) => Promise<{ data: Reaction[] }>;
+      listForIssue: (params: {
+        owner: string;
+        repo: string;
+        issue_number: number;
+        per_page?: number;
+      }) => Promise<{ data: Reaction[] }>;
     };
   };
   paginate: {
@@ -435,6 +441,50 @@ export class IssueOperations {
     }
 
     return false;
+  }
+
+  /**
+   * Get users who have reacted 👍 on the issue itself, indicating discussion readiness.
+   *
+   * Reads reactions from the issue description (not from a comment).
+   * Much simpler than getValidatedVoteCounts — we only care about +1 reactions.
+   *
+   * Returns a set of lowercased usernames.
+   */
+  async getDiscussionReadiness(ref: IssueRef): Promise<Set<string>> {
+    const iterator = this.client.paginate.iterator<Reaction>(
+      this.client.rest.reactions.listForIssue,
+      {
+        owner: ref.owner,
+        repo: ref.repo,
+        issue_number: ref.issueNumber,
+        per_page: 100,
+      }
+    );
+
+    const readyUsers = new Set<string>();
+    let nullUserReactions = 0;
+
+    for await (const { data: reactions } of iterator) {
+      for (const reaction of reactions) {
+        if (reaction.content !== "+1") {
+          continue;
+        }
+        if (!reaction.user?.login) {
+          nullUserReactions++;
+          continue;
+        }
+        readyUsers.add(reaction.user.login.toLowerCase());
+      }
+    }
+
+    if (nullUserReactions > 0) {
+      logger.info(
+        `Issue #${ref.issueNumber}: skipped ${nullUserReactions} readiness reaction(s) without users (likely deleted accounts).`,
+      );
+    }
+
+    return readyUsers;
   }
 
   /**

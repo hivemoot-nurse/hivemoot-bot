@@ -39,6 +39,17 @@ export interface VotingExit {
   requiredVoters: RequiredVotersConfig;
 }
 
+export interface RequiredReadyConfig {
+  mode: RequiredVotersMode;
+  users: string[];
+}
+
+export interface DiscussionExit {
+  afterMs: number;
+  minReady: number;
+  requiredReady: RequiredReadyConfig;
+}
+
 /**
  * Schema for .github/hivemoot.yml config file.
  */
@@ -47,7 +58,7 @@ export interface RepoConfigFile {
   governance?: {
     proposals?: {
       discussion?: {
-        durationMinutes?: number;
+        exits?: unknown[];
       };
       voting?: {
         exits?: unknown[];
@@ -69,6 +80,8 @@ export interface EffectiveConfig {
   governance: {
     proposals: {
       discussion: {
+        exits: DiscussionExit[];
+        /** Derived from last exit's afterMs (the deadline) */
         durationMs: number;
       };
       voting: {
@@ -115,13 +128,6 @@ export interface RepoConfigClient {
 
 const CONFIG_PATH = ".github/hivemoot.yml";
 const MS_PER_MINUTE = 60 * 1000;
-const DEFAULT_DISCUSSION_MINUTES = Math.round(DISCUSSION_DURATION_MS / MS_PER_MINUTE);
-
-const DISCUSSION_DURATION_BOUNDS = {
-  ...CONFIG_BOUNDS.phaseDurationMinutes,
-  default: DEFAULT_DISCUSSION_MINUTES,
-};
-
 const PR_STALE_DAYS_BOUNDS = {
   ...CONFIG_BOUNDS.prStaleDays,
   default: PR_STALE_THRESHOLD_DAYS,
@@ -136,42 +142,17 @@ const MIN_VOTERS_BOUNDS = {
   ...CONFIG_BOUNDS.voting.minVoters,
 };
 
+// minReady shares the same bounds as minVoters (0..50, default 0)
+const MIN_READY_BOUNDS = {
+  ...CONFIG_BOUNDS.voting.minVoters,
+  default: 0,
+};
+
 /**
  * Clamp a value to the specified bounds.
  */
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
-}
-
-/**
- * Validate and clamp a duration value from config.
- * Returns the clamped value in milliseconds, or default if invalid.
- */
-function parseDurationMinutes(
-  value: unknown,
-  bounds: { min: number; max: number; default: number },
-  fieldName: string,
-  repoFullName: string
-): number {
-  if (value === undefined || value === null) {
-    return bounds.default * 60 * 1000;
-  }
-
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    logger.warn(
-      `[${repoFullName}] Invalid ${fieldName}: expected number, got ${typeof value}. Using default.`
-    );
-    return bounds.default * 60 * 1000;
-  }
-
-  const clamped = clamp(value, bounds.min, bounds.max);
-  if (clamped !== value) {
-    logger.info(
-      `[${repoFullName}] ${fieldName} clamped from ${value} to ${clamped} (bounds: ${bounds.min}-${bounds.max})`
-    );
-  }
-
-  return clamped * 60 * 1000;
 }
 
 /**
@@ -214,12 +195,13 @@ function parseIntValue(
  */
 function parseVotersList(
   value: unknown,
-  repoFullName: string
+  repoFullName: string,
+  fieldName: string = "requiredVoters"
 ): string[] {
   if (!Array.isArray(value)) {
     if (value !== undefined && value !== null) {
       logger.warn(
-        `[${repoFullName}] Invalid requiredVoters.voters: expected array. Using default (empty).`
+        `[${repoFullName}] Invalid ${fieldName}.voters: expected array. Using default (empty).`
       );
     }
     return [];
@@ -235,14 +217,14 @@ function parseVotersList(
   for (const entry of value) {
     if (result.length >= maxEntries) {
       logger.info(
-        `[${repoFullName}] requiredVoters truncated to ${maxEntries} entries`
+        `[${repoFullName}] ${fieldName} truncated to ${maxEntries} entries`
       );
       break;
     }
 
     if (typeof entry !== "string" || entry.length === 0) {
       logger.warn(
-        `[${repoFullName}] Invalid requiredVoters entry: expected non-empty string, got ${typeof entry}. Skipping.`
+        `[${repoFullName}] Invalid ${fieldName} entry: expected non-empty string, got ${typeof entry}. Skipping.`
       );
       continue;
     }
@@ -251,14 +233,14 @@ function parseVotersList(
     const cleaned = entry.trim().replace(/^@/, "");
     if (cleaned.length === 0) {
       logger.warn(
-        `[${repoFullName}] Empty requiredVoters entry after trimming: "${entry}". Skipping.`
+        `[${repoFullName}] Empty ${fieldName} entry after trimming: "${entry}". Skipping.`
       );
       continue;
     }
 
     if (cleaned.length > maxUsernameLength) {
       logger.warn(
-        `[${repoFullName}] Invalid requiredVoters entry '${cleaned}': exceeds max length ${maxUsernameLength}. Skipping.`
+        `[${repoFullName}] Invalid ${fieldName} entry '${cleaned}': exceeds max length ${maxUsernameLength}. Skipping.`
       );
       continue;
     }
@@ -266,7 +248,7 @@ function parseVotersList(
     const normalized = cleaned.toLowerCase();
     if (!isValidGitHubUsername(normalized)) {
       logger.warn(
-        `[${repoFullName}] Invalid requiredVoters entry '${cleaned}': not a valid GitHub username. Skipping.`
+        `[${repoFullName}] Invalid ${fieldName} entry '${cleaned}': not a valid GitHub username. Skipping.`
       );
       continue;
     }
@@ -437,6 +419,148 @@ function parseExits(
 }
 
 /**
+ * Parse and validate requiredReady from config.
+ *
+ * Accepts either:
+ * - Array shorthand: ["alice", "bob"] → { mode: "all", users: [...] }
+ * - Object format: { mode: "any", users: ["alice"] }
+ *
+ * Reuses parseVotersList for username validation.
+ */
+function parseRequiredReadyConfig(
+  value: unknown,
+  repoFullName: string
+): RequiredReadyConfig {
+  if (value === undefined || value === null) {
+    return { mode: "all", users: [] };
+  }
+
+  // Array shorthand → mode: "all"
+  if (Array.isArray(value)) {
+    return { mode: "all", users: parseVotersList(value, repoFullName, "requiredReady") };
+  }
+
+  if (typeof value !== "object") {
+    logger.warn(
+      `[${repoFullName}] Invalid requiredReady: expected object or array. Using default.`
+    );
+    return { mode: "all", users: [] };
+  }
+
+  const obj = value as { mode?: unknown; users?: unknown };
+
+  // Validate mode
+  let mode: RequiredVotersMode = "all";
+  if (obj.mode !== undefined && obj.mode !== null) {
+    if (obj.mode === "all" || obj.mode === "any") {
+      mode = obj.mode;
+    } else {
+      logger.warn(
+        `[${repoFullName}] Invalid requiredReady.mode: "${String(obj.mode)}". Using default ("all").`
+      );
+    }
+  }
+
+  return { mode, users: parseVotersList(obj.users, repoFullName, "requiredReady") };
+}
+
+/**
+ * Parse and validate discussion exits from config.
+ *
+ * Each exit has:
+ * - afterMinutes: time gate (clamped to phaseDurationMinutes bounds)
+ * - minReady: quorum of 👍 reactions (clamped, default 0)
+ * - requiredReady: specific users who must have reacted 👍
+ *
+ * Sorted ascending by afterMs. Falls back to single deadline exit if missing.
+ */
+function parseDiscussionExits(
+  value: unknown,
+  defaultAfterMs: number,
+  repoFullName: string,
+): DiscussionExit[] {
+  const defaultRequiredReady: RequiredReadyConfig = { mode: "all", users: [] };
+
+  const defaultExit: DiscussionExit = {
+    afterMs: defaultAfterMs,
+    minReady: 0,
+    requiredReady: defaultRequiredReady,
+  };
+
+  if (value === undefined || value === null) {
+    return [defaultExit];
+  }
+
+  if (!Array.isArray(value)) {
+    logger.warn(
+      `[${repoFullName}] Invalid discussion exits: expected array. Using default.`
+    );
+    return [defaultExit];
+  }
+
+  if (value.length === 0) {
+    logger.warn(
+      `[${repoFullName}] Empty discussion exits array. Using default.`
+    );
+    return [defaultExit];
+  }
+
+  const bounds = CONFIG_BOUNDS.phaseDurationMinutes;
+
+  const exits: DiscussionExit[] = value
+    .filter((entry): entry is Record<string, unknown> => {
+      if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+        logger.warn(`[${repoFullName}] Invalid discussion exit entry: expected object. Skipping.`);
+        return false;
+      }
+      return true;
+    })
+    .map((entry) => {
+      // Parse afterMinutes
+      const afterMinutesRaw = entry.afterMinutes;
+      let afterMs: number;
+      if (typeof afterMinutesRaw !== "number" || !Number.isFinite(afterMinutesRaw)) {
+        logger.warn(
+          `[${repoFullName}] Invalid discussion exit afterMinutes: expected number. Using default.`
+        );
+        afterMs = defaultAfterMs;
+      } else {
+        const clamped = clamp(afterMinutesRaw, bounds.min, bounds.max);
+        if (clamped !== afterMinutesRaw) {
+          logger.info(
+            `[${repoFullName}] discussion exit afterMinutes clamped from ${afterMinutesRaw} to ${clamped}`
+          );
+        }
+        afterMs = clamped * MS_PER_MINUTE;
+      }
+
+      // Parse minReady (default 0)
+      const minReady = (entry.minReady !== undefined && entry.minReady !== null)
+        ? parseIntValue(entry.minReady, MIN_READY_BOUNDS, "discussion exit.minReady", repoFullName)
+        : 0;
+
+      // Parse requiredReady (default empty)
+      const requiredReady = (entry.requiredReady !== undefined && entry.requiredReady !== null)
+        ? parseRequiredReadyConfig(entry.requiredReady, repoFullName)
+        : defaultRequiredReady;
+
+      return { afterMs, minReady, requiredReady };
+    });
+
+  if (exits.length === 0) {
+    logger.warn(
+      `[${repoFullName}] All discussion exit entries were invalid. Using default.`
+    );
+    return [defaultExit];
+  }
+
+  // Sort ascending by afterMs
+  exits.sort((a, b) => a.afterMs - b.afterMs);
+
+  return exits;
+}
+
+/**
  * Parse and validate a RepoConfigFile object.
  * Returns EffectiveConfig with all values validated and clamped.
  *
@@ -445,16 +569,15 @@ function parseExits(
 function parseRepoConfig(raw: unknown, repoFullName: string): EffectiveConfig {
   const config = raw as RepoConfigFile | undefined;
 
-  // Resolve discussion duration
-  const discussionMinutesRaw =
-    config?.governance?.proposals?.discussion?.durationMinutes;
+  // Discussion exits (default: single exit at DISCUSSION_DURATION_MS)
+  const discussionExitsRaw = config?.governance?.proposals?.discussion?.exits;
+  const discussionExits = parseDiscussionExits(discussionExitsRaw, DISCUSSION_DURATION_MS, repoFullName);
 
   // Resolve PR settings
   const prConfig = config?.governance?.pr;
 
-  // Exits (default applied if missing)
+  // Voting exits (default applied if missing)
   const exitsRaw = config?.governance?.proposals?.voting?.exits;
-
   const exits = parseExits(exitsRaw, repoFullName);
 
   return {
@@ -462,12 +585,8 @@ function parseRepoConfig(raw: unknown, repoFullName: string): EffectiveConfig {
     governance: {
       proposals: {
         discussion: {
-          durationMs: parseDurationMinutes(
-            discussionMinutesRaw,
-            DISCUSSION_DURATION_BOUNDS,
-            "governance.proposals.discussion.durationMinutes",
-            repoFullName
-          ),
+          exits: discussionExits,
+          durationMs: discussionExits[discussionExits.length - 1].afterMs,
         },
         voting: {
           exits,
@@ -501,6 +620,11 @@ export function getDefaultConfig(): EffectiveConfig {
     governance: {
       proposals: {
         discussion: {
+          exits: [{
+            afterMs: DISCUSSION_DURATION_MS,
+            minReady: 0,
+            requiredReady: { mode: "all" as const, users: [] },
+          }],
           durationMs: DISCUSSION_DURATION_MS,
         },
         voting: {

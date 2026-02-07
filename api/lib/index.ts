@@ -47,6 +47,7 @@ export {
   createGovernanceService,
   isDecisive,
   isExitEligible,
+  isDiscussionExitEligible,
   isUnanimous,
 } from "./governance.js";
 export type { GovernanceServiceConfig, EndVotingOptions } from "./governance.js";
@@ -67,6 +68,8 @@ export type {
   RepoConfigClient,
   RequiredVotersConfig,
   RequiredVotersMode,
+  RequiredReadyConfig,
   VotingExit,
+  DiscussionExit,
   ExitRequires,
 } from "./repo-config.js";

@@ -59,6 +59,13 @@ describe("repo-config", () => {
       const defaults = getDefaultConfig();
 
       expect(defaults.governance.proposals.discussion.durationMs).toBe(DISCUSSION_DURATION_MS);
+      expect(defaults.governance.proposals.discussion.exits).toEqual([
+        {
+          afterMs: DISCUSSION_DURATION_MS,
+          minReady: 0,
+          requiredReady: { mode: "all", users: [] },
+        },
+      ]);
       expect(defaults.governance.proposals.voting.exits).toEqual([
         {
           afterMs: defaultDurationMs,
@@ -81,7 +88,15 @@ version: 1
 governance:
   proposals:
     discussion:
-      durationMinutes: 120
+      exits:
+        - afterMinutes: 30
+          minReady: 3
+          requiredReady:
+            mode: all
+            users:
+              - seed-scout
+              - seed-worker
+        - afterMinutes: 120
     voting:
       exits:
         - afterMinutes: 15
@@ -121,6 +136,11 @@ governance:
         const config = await loadRepositoryConfig(octokit, "owner", "repo");
 
         expect(config.version).toBe(1);
+        // Discussion exits parsed and sorted, durationMs from last exit
+        expect(config.governance.proposals.discussion.exits).toEqual([
+          { afterMs: 30 * MS, minReady: 3, requiredReady: { mode: "all", users: ["seed-scout", "seed-worker"] } },
+          { afterMs: 120 * MS, minReady: 0, requiredReady: { mode: "all", users: [] } },
+        ]);
         expect(config.governance.proposals.discussion.durationMs).toBe(120 * MS);
         expect(config.governance.proposals.voting.exits).toEqual([
           { afterMs: 15 * MS, requires: "unanimous", minVoters: 3, requiredVoters: { mode: "all", voters: ["seed-scout", "seed-worker"] } },
@@ -691,6 +711,188 @@ governance:
       });
     });
 
+    describe("discussion exits parsing", () => {
+      it("should parse discussion exits with all fields", async () => {
+        const configYaml = `
+governance:
+  proposals:
+    discussion:
+      exits:
+        - afterMinutes: 30
+          minReady: 3
+          requiredReady:
+            mode: all
+            users:
+              - seed-scout
+              - seed-worker
+              - seed-analyst
+        - afterMinutes: 120
+          minReady: 2
+          requiredReady:
+            mode: any
+            users:
+              - seed-scout
+              - seed-worker
+        - afterMinutes: 1440
+`;
+        const octokit = createMockOctokit({
+          data: { type: "file", content: encodeBase64(configYaml), encoding: "base64" },
+        });
+
+        const config = await loadRepositoryConfig(octokit, "owner", "repo");
+
+        expect(config.governance.proposals.discussion.exits).toEqual([
+          { afterMs: 30 * MS, minReady: 3, requiredReady: { mode: "all", users: ["seed-scout", "seed-worker", "seed-analyst"] } },
+          { afterMs: 120 * MS, minReady: 2, requiredReady: { mode: "any", users: ["seed-scout", "seed-worker"] } },
+          { afterMs: 1440 * MS, minReady: 0, requiredReady: { mode: "all", users: [] } },
+        ]);
+        expect(config.governance.proposals.discussion.durationMs).toBe(1440 * MS);
+      });
+
+      it("should default to single exit at DISCUSSION_DURATION_MS when no exits configured", async () => {
+        const configYaml = `
+governance:
+  proposals:
+    voting:
+      exits:
+        - afterMinutes: 60
+`;
+        const octokit = createMockOctokit({
+          data: { type: "file", content: encodeBase64(configYaml), encoding: "base64" },
+        });
+
+        const config = await loadRepositoryConfig(octokit, "owner", "repo");
+
+        expect(config.governance.proposals.discussion.exits).toHaveLength(1);
+        expect(config.governance.proposals.discussion.exits[0].afterMs).toBe(DISCUSSION_DURATION_MS);
+        expect(config.governance.proposals.discussion.exits[0].minReady).toBe(0);
+        expect(config.governance.proposals.discussion.exits[0].requiredReady).toEqual({ mode: "all", users: [] });
+        expect(config.governance.proposals.discussion.durationMs).toBe(DISCUSSION_DURATION_MS);
+      });
+
+      it("should default to single exit when empty array", async () => {
+        const configYaml = `
+governance:
+  proposals:
+    discussion:
+      exits: []
+`;
+        const octokit = createMockOctokit({
+          data: { type: "file", content: encodeBase64(configYaml), encoding: "base64" },
+        });
+
+        const config = await loadRepositoryConfig(octokit, "owner", "repo");
+
+        expect(config.governance.proposals.discussion.exits).toHaveLength(1);
+        expect(config.governance.proposals.discussion.exits[0].afterMs).toBe(DISCUSSION_DURATION_MS);
+      });
+
+      it("should default minReady to 0 and requiredReady to empty when not specified", async () => {
+        const configYaml = `
+governance:
+  proposals:
+    discussion:
+      exits:
+        - afterMinutes: 60
+`;
+        const octokit = createMockOctokit({
+          data: { type: "file", content: encodeBase64(configYaml), encoding: "base64" },
+        });
+
+        const config = await loadRepositoryConfig(octokit, "owner", "repo");
+
+        expect(config.governance.proposals.discussion.exits[0].minReady).toBe(0);
+        expect(config.governance.proposals.discussion.exits[0].requiredReady).toEqual({ mode: "all", users: [] });
+      });
+
+      it("should handle array shorthand for requiredReady", async () => {
+        const configYaml = `
+governance:
+  proposals:
+    discussion:
+      exits:
+        - afterMinutes: 60
+          requiredReady:
+            - alice
+            - bob
+`;
+        const octokit = createMockOctokit({
+          data: { type: "file", content: encodeBase64(configYaml), encoding: "base64" },
+        });
+
+        const config = await loadRepositoryConfig(octokit, "owner", "repo");
+
+        expect(config.governance.proposals.discussion.exits[0].requiredReady).toEqual({
+          mode: "all",
+          users: ["alice", "bob"],
+        });
+      });
+
+      it("should support mode: any for requiredReady", async () => {
+        const configYaml = `
+governance:
+  proposals:
+    discussion:
+      exits:
+        - afterMinutes: 60
+          requiredReady:
+            mode: any
+            users:
+              - alice
+              - bob
+`;
+        const octokit = createMockOctokit({
+          data: { type: "file", content: encodeBase64(configYaml), encoding: "base64" },
+        });
+
+        const config = await loadRepositoryConfig(octokit, "owner", "repo");
+
+        expect(config.governance.proposals.discussion.exits[0].requiredReady).toEqual({
+          mode: "any",
+          users: ["alice", "bob"],
+        });
+      });
+
+      it("should sort discussion exits ascending by afterMs", async () => {
+        const configYaml = `
+governance:
+  proposals:
+    discussion:
+      exits:
+        - afterMinutes: 120
+        - afterMinutes: 30
+        - afterMinutes: 60
+`;
+        const octokit = createMockOctokit({
+          data: { type: "file", content: encodeBase64(configYaml), encoding: "base64" },
+        });
+
+        const config = await loadRepositoryConfig(octokit, "owner", "repo");
+
+        const afterMsValues = config.governance.proposals.discussion.exits.map(e => e.afterMs);
+        expect(afterMsValues).toEqual([30 * MS, 60 * MS, 120 * MS]);
+      });
+
+      it("should clamp discussion exit afterMinutes", async () => {
+        const configYaml = `
+governance:
+  proposals:
+    discussion:
+      exits:
+        - afterMinutes: -5
+`;
+        const octokit = createMockOctokit({
+          data: { type: "file", content: encodeBase64(configYaml), encoding: "base64" },
+        });
+
+        const config = await loadRepositoryConfig(octokit, "owner", "repo");
+
+        expect(config.governance.proposals.discussion.exits[0].afterMs).toBe(
+          CONFIG_BOUNDS.phaseDurationMinutes.min * MS
+        );
+      });
+    });
+
     describe("missing file handling", () => {
       it("should return defaults when config file not found (404)", async () => {
         const octokit = createMockOctokit({
@@ -851,12 +1053,13 @@ governance:
     });
 
     describe("boundary clamping", () => {
-      it("should clamp discussion duration below minimum to minimum", async () => {
+      it("should clamp discussion exit afterMinutes below minimum to minimum", async () => {
         const configYaml = `
 governance:
   proposals:
     discussion:
-      durationMinutes: 0
+      exits:
+        - afterMinutes: 0
 `;
         const octokit = createMockOctokit({
           data: {
@@ -870,14 +1073,16 @@ governance:
 
         const minMs = CONFIG_BOUNDS.phaseDurationMinutes.min * MS;
         expect(config.governance.proposals.discussion.durationMs).toBe(minMs);
+        expect(config.governance.proposals.discussion.exits[0].afterMs).toBe(minMs);
       });
 
-      it("should clamp duration above maximum to maximum", async () => {
+      it("should clamp discussion exit afterMinutes above maximum to maximum", async () => {
         const configYaml = `
 governance:
   proposals:
     discussion:
-      durationMinutes: 999999999
+      exits:
+        - afterMinutes: 999999999
 `;
         const octokit = createMockOctokit({
           data: {
@@ -891,6 +1096,7 @@ governance:
 
         const maxMs = CONFIG_BOUNDS.phaseDurationMinutes.max * MS;
         expect(config.governance.proposals.discussion.durationMs).toBe(maxMs);
+        expect(config.governance.proposals.discussion.exits[0].afterMs).toBe(maxMs);
       });
 
       it("should clamp staleDays to boundaries", async () => {
@@ -936,7 +1142,8 @@ governance:
 governance:
   proposals:
     discussion:
-      durationMinutes: ${CONFIG_BOUNDS.phaseDurationMinutes.min}
+      exits:
+        - afterMinutes: ${CONFIG_BOUNDS.phaseDurationMinutes.min}
   pr:
     staleDays: ${CONFIG_BOUNDS.prStaleDays.max}
     maxPRsPerIssue: ${CONFIG_BOUNDS.maxPRsPerIssue.min}

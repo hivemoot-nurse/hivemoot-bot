@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { GovernanceService, createGovernanceService, isUnanimous, isDecisive, type EndVotingOptions } from "./governance.js";
+import { GovernanceService, createGovernanceService, isUnanimous, isDecisive, isDiscussionExitEligible, type EndVotingOptions } from "./governance.js";
+import type { DiscussionExit } from "./repo-config.js";
 import type { IssueOperations } from "./github-client.js";
 import type { IssueRef, VoteCounts, ValidatedVoteResult } from "./types.js";
 import { LABELS, MESSAGES, SIGNATURE } from "../config.js";
@@ -54,11 +55,17 @@ describe("GovernanceService", () => {
   });
 
   describe("startDiscussion", () => {
-    it("should add phase:discussion label and post welcome comment", async () => {
+    it("should add phase:discussion label and post welcome comment with metadata", async () => {
       await governance.startDiscussion(testRef);
 
       expect(mockIssues.addLabels).toHaveBeenCalledWith(testRef, [LABELS.DISCUSSION]);
-      expect(mockIssues.comment).toHaveBeenCalledWith(testRef, MESSAGES.ISSUE_WELCOME);
+      expect(mockIssues.comment).toHaveBeenCalledTimes(1);
+
+      const commentBody = vi.mocked(mockIssues.comment).mock.calls[0][1];
+      // Should contain welcome metadata tag and the welcome message
+      expect(commentBody).toContain("hivemoot-metadata:");
+      expect(commentBody).toContain('"type":"welcome"');
+      expect(commentBody).toContain(MESSAGES.ISSUE_WELCOME);
     });
 
     it("should run label and comment in parallel", async () => {
@@ -925,5 +932,84 @@ describe("createGovernanceService", () => {
 
     const service = createGovernanceService(mockIssues, { logger: mockLogger });
     expect(service).toBeInstanceOf(GovernanceService);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// isDiscussionExitEligible
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("isDiscussionExitEligible", () => {
+  const baseExit: DiscussionExit = {
+    afterMs: 30 * 60 * 1000,
+    minReady: 0,
+    requiredReady: { mode: "all", users: [] },
+  };
+
+  it("should return true when no conditions (pure time gate)", () => {
+    const readyUsers = new Set<string>();
+    expect(isDiscussionExitEligible(baseExit, readyUsers)).toBe(true);
+  });
+
+  it("should return true when minReady met", () => {
+    const exit = { ...baseExit, minReady: 2 };
+    const readyUsers = new Set(["alice", "bob"]);
+    expect(isDiscussionExitEligible(exit, readyUsers)).toBe(true);
+  });
+
+  it("should return false when minReady not met", () => {
+    const exit = { ...baseExit, minReady: 3 };
+    const readyUsers = new Set(["alice", "bob"]);
+    expect(isDiscussionExitEligible(exit, readyUsers)).toBe(false);
+  });
+
+  it("should return true when all required users ready (mode: all)", () => {
+    const exit: DiscussionExit = {
+      ...baseExit,
+      requiredReady: { mode: "all", users: ["alice", "bob"] },
+    };
+    const readyUsers = new Set(["alice", "bob", "charlie"]);
+    expect(isDiscussionExitEligible(exit, readyUsers)).toBe(true);
+  });
+
+  it("should return false when some required users missing (mode: all)", () => {
+    const exit: DiscussionExit = {
+      ...baseExit,
+      requiredReady: { mode: "all", users: ["alice", "bob"] },
+    };
+    const readyUsers = new Set(["alice"]);
+    expect(isDiscussionExitEligible(exit, readyUsers)).toBe(false);
+  });
+
+  it("should return true when any required user ready (mode: any)", () => {
+    const exit: DiscussionExit = {
+      ...baseExit,
+      requiredReady: { mode: "any", users: ["alice", "bob"] },
+    };
+    const readyUsers = new Set(["bob"]);
+    expect(isDiscussionExitEligible(exit, readyUsers)).toBe(true);
+  });
+
+  it("should return false when no required user ready (mode: any)", () => {
+    const exit: DiscussionExit = {
+      ...baseExit,
+      requiredReady: { mode: "any", users: ["alice", "bob"] },
+    };
+    const readyUsers = new Set(["charlie"]);
+    expect(isDiscussionExitEligible(exit, readyUsers)).toBe(false);
+  });
+
+  it("should check both minReady and requiredReady together", () => {
+    const exit: DiscussionExit = {
+      ...baseExit,
+      minReady: 3,
+      requiredReady: { mode: "all", users: ["alice"] },
+    };
+    // Alice is ready but total < 3
+    expect(isDiscussionExitEligible(exit, new Set(["alice", "bob"]))).toBe(false);
+    // Total >= 3 and alice is ready
+    expect(isDiscussionExitEligible(exit, new Set(["alice", "bob", "charlie"]))).toBe(true);
+    // Total >= 3 but alice is NOT ready
+    expect(isDiscussionExitEligible(exit, new Set(["bob", "charlie", "dave"]))).toBe(false);
   });
 });

@@ -126,6 +126,10 @@ export const ISSUE_CLIENT_CHECKS: ValidationCheck[] = [
     path: "rest.issues",
     requiredMethods: ["get", "addLabels", "removeLabel", "createComment", "update", "lock", "unlock"],
   },
+  {
+    path: "rest.reactions",
+    requiredMethods: ["listForIssueComment", "listForIssue"],
+  },
 ];
 
 /**

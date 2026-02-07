@@ -23,8 +23,8 @@ import {
 } from "../api/lib/index.js";
 import { NOTIFICATION_TYPES } from "../api/lib/bot-comments.js";
 import { runForAllRepositories, runIfMain } from "./shared/run-installations.js";
-import { isExitEligible } from "../api/lib/governance.js";
-import type { Repository, Issue, IssueRef, EffectiveConfig, VotingOutcome } from "../api/lib/index.js";
+import { isExitEligible, isDiscussionExitEligible } from "../api/lib/governance.js";
+import type { Repository, Issue, IssueRef, EffectiveConfig, VotingOutcome, DiscussionExit } from "../api/lib/index.js";
 import type { IssueOperations } from "../api/lib/github-client.js";
 import type { GovernanceService } from "../api/lib/governance.js";
 
@@ -186,6 +186,9 @@ export function makeEarlyDecisionCheck(
   }
 
   return async (ref: IssueRef, elapsed: number): Promise<boolean> => {
+    let matchedExit: (typeof earlyExits)[number] | null = null;
+    let validated: import("../api/lib/types.js").ValidatedVoteResult | null = null;
+
     try {
       // Find exits whose time gate has elapsed
       const eligible = earlyExits.filter(e => elapsed >= e.afterMs);
@@ -194,7 +197,7 @@ export function makeEarlyDecisionCheck(
       const commentId = await findVotingCommentId(ref);
       if (!commentId) return false;
 
-      const validated = await getValidatedVoteCounts(ref, commentId);
+      validated = await getValidatedVoteCounts(ref, commentId);
 
       // Try each eligible exit (first match wins)
       for (const exit of eligible) {
@@ -205,27 +208,12 @@ export function makeEarlyDecisionCheck(
           `Early decision for #${ref.issueNumber}: exit(after=${exit.afterMs}ms, ` +
           `requires=${exit.requires}), ${validated.voters.length} valid voters`
         );
-
-        const outcome = await resolveFn(ref, {
-          ...votingEndOptions,
-          earlyDecision: true,
-          votingConfig: {
-            minVoters: exit.minVoters,
-            requiredVoters: exit.requiredVoters,
-          },
-          validatedVotes: validated,
-        });
-        trackOutcome(outcome, ref.issueNumber);
-        if (outcome === "phase:ready-to-implement") {
-          await notifyPRs(ref.issueNumber);
-        }
-        return true;
+        matchedExit = exit;
+        break;
       }
-
-      return false;
     } catch (error) {
-      // Early decision is an optimization — if it fails, the normal
-      // timer-based path will handle this issue when the voting period
+      // Early decision is an optimization — if the eligibility check fails,
+      // the normal timer-based path handles this issue when the voting period
       // expires. Returning false defers to that safer path.
       const errorMessage = error instanceof Error ? error.message : String(error);
       const errorName = error instanceof Error ? error.constructor.name : typeof error;
@@ -234,6 +222,101 @@ export function makeEarlyDecisionCheck(
       );
       return false;
     }
+
+    if (!matchedExit || !validated) return false;
+
+    // Resolution errors must propagate — the caller has retry logic.
+    // Swallowing here would mask partial transitions.
+    const outcome = await resolveFn(ref, {
+      ...votingEndOptions,
+      earlyDecision: true,
+      votingConfig: {
+        minVoters: matchedExit.minVoters,
+        requiredVoters: matchedExit.requiredVoters,
+      },
+      validatedVotes: validated,
+    });
+    trackOutcome(outcome, ref.issueNumber);
+    if (outcome === "phase:ready-to-implement") {
+      await notifyPRs(ref.issueNumber);
+    }
+    return true;
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Discussion Early Check Factory
+// ───────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Dependencies required by the discussion early check.
+ */
+export interface DiscussionEarlyCheckDeps {
+  /** Early exits to evaluate (all except deadline) */
+  earlyExits: DiscussionExit[];
+  /** Get 👍 reactors on the issue itself */
+  getDiscussionReadiness: (ref: IssueRef) => Promise<Set<string>>;
+}
+
+/**
+ * Factory for discussion early checks using exit evaluation.
+ * Returns a function that checks if discussion can end early, or undefined
+ * if there are no early exits configured.
+ *
+ * Mirrors makeEarlyDecisionCheck but for discussion readiness signals
+ * instead of voting results.
+ *
+ * @param transitionFn - The function to call when early exit triggers (transitionToVoting)
+ * @param deps - Dependencies for the check
+ * @returns Early check function, or undefined if no early exits
+ */
+export function makeDiscussionEarlyCheck(
+  transitionFn: (ref: IssueRef) => Promise<unknown>,
+  deps: DiscussionEarlyCheckDeps,
+): ((ref: IssueRef, elapsed: number) => Promise<boolean>) | undefined {
+  const { earlyExits, getDiscussionReadiness } = deps;
+
+  if (earlyExits.length === 0) {
+    return undefined;
+  }
+
+  return async (ref: IssueRef, elapsed: number): Promise<boolean> => {
+    let shouldTransition = false;
+    try {
+      // Find exits whose time gate has elapsed
+      const eligible = earlyExits.filter(e => elapsed >= e.afterMs);
+      if (eligible.length === 0) return false;
+
+      const readyUsers = await getDiscussionReadiness(ref);
+
+      // Try each eligible exit (first match wins)
+      for (const exit of eligible) {
+        if (!isDiscussionExitEligible(exit, readyUsers)) continue;
+
+        logger.info(
+          `Early discussion exit for #${ref.issueNumber}: exit(after=${exit.afterMs}ms), ` +
+          `${readyUsers.size} ready users`
+        );
+        shouldTransition = true;
+        break;
+      }
+    } catch (error) {
+      // Only readiness-check errors reach here (API flakes, etc).
+      // Transition errors propagate to the caller's withRetry handler.
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorName = error instanceof Error ? error.constructor.name : typeof error;
+      logger.warn(
+        `Discussion early check failed for #${ref.issueNumber} [${errorName}]: ${errorMessage}. Deferring to normal timer.`
+      );
+      return false;
+    }
+
+    if (!shouldTransition) return false;
+
+    // Transition errors must propagate — the caller has retry logic.
+    // Swallowing here would mask partial transitions.
+    await transitionFn(ref);
+    return true;
   };
 }
 
@@ -532,12 +615,21 @@ async function processRepository(
       notifyPRs: (issueNumber) => notifyPendingPRs(octokit, appId, owner, repoName, issueNumber),
     };
 
+    const { discussion } = repoConfig.governance.proposals;
+
     const phases: PhaseConfig[] = [
       {
         label: LABELS.DISCUSSION,
-        durationMs: repoConfig.governance.proposals.discussion.durationMs,
+        durationMs: discussion.durationMs,
         phaseName: "discussion",
         transition: (_gov, ref) => governance.transitionToVoting(ref),
+        earlyCheck: makeDiscussionEarlyCheck(
+          (ref) => governance.transitionToVoting(ref),
+          {
+            earlyExits: discussion.exits.slice(0, -1),
+            getDiscussionReadiness: (ref) => issues.getDiscussionReadiness(ref),
+          },
+        ),
       },
       {
         label: LABELS.VOTING,

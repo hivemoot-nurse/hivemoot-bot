@@ -1,5 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+
+vi.mock("./logger.js", () => ({
+  logger: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    debug: vi.fn(),
+    error: vi.fn(),
+    group: vi.fn(),
+    groupEnd: vi.fn(),
+  },
+}));
+
 import { IssueOperations, createIssueOperations } from "./github-client.js";
+import { logger as mockLogger } from "./logger.js";
 import type { GitHubClient } from "./github-client.js";
 import type { IssueRef } from "./types.js";
 import { SIGNATURES, buildVotingComment, buildHumanHelpComment, buildNotificationComment, NOTIFICATION_TYPES } from "./bot-comments.js";
@@ -42,6 +55,7 @@ describe("createIssueOperations", () => {
         },
         reactions: {
           listForIssueComment: vi.fn(),
+          listForIssue: vi.fn(),
         },
       },
       paginate: {
@@ -99,6 +113,50 @@ describe("createIssueOperations", () => {
     expect(() => createIssueOperations(invalidClient, { appId: TEST_APP_ID })).toThrow("Invalid GitHub client");
   });
 
+  it("should throw for object missing rest.reactions", () => {
+    const invalidClient = {
+      rest: {
+        issues: {
+          get: vi.fn(),
+          addLabels: vi.fn(),
+          removeLabel: vi.fn(),
+          createComment: vi.fn(),
+          update: vi.fn(),
+          lock: vi.fn(),
+          unlock: vi.fn(),
+        },
+      },
+      paginate: {
+        iterator: vi.fn(),
+      },
+    };
+    expect(() => createIssueOperations(invalidClient, { appId: TEST_APP_ID })).toThrow("Invalid GitHub client");
+  });
+
+  it("should throw for object missing reactions.listForIssue", () => {
+    const invalidClient = {
+      rest: {
+        issues: {
+          get: vi.fn(),
+          addLabels: vi.fn(),
+          removeLabel: vi.fn(),
+          createComment: vi.fn(),
+          update: vi.fn(),
+          lock: vi.fn(),
+          unlock: vi.fn(),
+        },
+        reactions: {
+          listForIssueComment: vi.fn(),
+          // missing listForIssue
+        },
+      },
+      paginate: {
+        iterator: vi.fn(),
+      },
+    };
+    expect(() => createIssueOperations(invalidClient, { appId: TEST_APP_ID })).toThrow("Invalid GitHub client");
+  });
+
   it("should accept paginate as a function with iterator property (octokit v5+ style)", () => {
     // In octokit v5+, paginate is a callable function with an iterator property attached
     const paginateFunction = vi.fn() as ReturnType<typeof vi.fn> & { iterator: ReturnType<typeof vi.fn> };
@@ -119,6 +177,7 @@ describe("createIssueOperations", () => {
         },
         reactions: {
           listForIssueComment: vi.fn(),
+          listForIssue: vi.fn(),
         },
       },
       paginate: paginateFunction,
@@ -167,6 +226,7 @@ describe("IssueOperations", () => {
         },
         reactions: {
           listForIssueComment: vi.fn().mockResolvedValue({ data: [] }),
+          listForIssue: vi.fn().mockResolvedValue({ data: [] }),
         },
       },
       paginate: {
@@ -1507,6 +1567,112 @@ describe("IssueOperations", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // getDiscussionReadiness
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  describe("getDiscussionReadiness", () => {
+    it("should return 👍 reactors as lowercased set", async () => {
+      mockClient.paginate.iterator = vi.fn().mockReturnValue({
+        async *[Symbol.asyncIterator]() {
+          yield {
+            data: [
+              { content: "+1", user: { login: "Alice" } },
+              { content: "+1", user: { login: "Bob" } },
+            ],
+          };
+        },
+      });
+
+      const result = await issueOps.getDiscussionReadiness(testRef);
+      expect(result).toEqual(new Set(["alice", "bob"]));
+    });
+
+    it("should ignore non-👍 reactions", async () => {
+      mockClient.paginate.iterator = vi.fn().mockReturnValue({
+        async *[Symbol.asyncIterator]() {
+          yield {
+            data: [
+              { content: "+1", user: { login: "Alice" } },
+              { content: "-1", user: { login: "Bob" } },
+              { content: "confused", user: { login: "Charlie" } },
+              { content: "heart", user: { login: "Dave" } },
+            ],
+          };
+        },
+      });
+
+      const result = await issueOps.getDiscussionReadiness(testRef);
+      expect(result).toEqual(new Set(["alice"]));
+    });
+
+    it("should return empty set when no reactions", async () => {
+      mockClient.paginate.iterator = vi.fn().mockReturnValue({
+        async *[Symbol.asyncIterator]() {
+          yield { data: [] };
+        },
+      });
+
+      const result = await issueOps.getDiscussionReadiness(testRef);
+      expect(result.size).toBe(0);
+    });
+
+    it("should skip reactions without user info", async () => {
+      mockClient.paginate.iterator = vi.fn().mockReturnValue({
+        async *[Symbol.asyncIterator]() {
+          yield {
+            data: [
+              { content: "+1", user: { login: "Alice" } },
+              { content: "+1", user: null },
+              { content: "+1" },
+            ],
+          };
+        },
+      });
+
+      const result = await issueOps.getDiscussionReadiness(testRef);
+      expect(result).toEqual(new Set(["alice"]));
+    });
+
+    it("should log info for null-user readiness reactions", async () => {
+      mockLogger.info.mockClear();
+      mockClient.paginate.iterator = vi.fn().mockReturnValue({
+        async *[Symbol.asyncIterator]() {
+          yield {
+            data: [
+              { content: "+1", user: { login: "Alice" } },
+              { content: "+1", user: null },
+              { content: "+1", user: null },
+            ],
+          };
+        },
+      });
+
+      const result = await issueOps.getDiscussionReadiness(testRef);
+      expect(result).toEqual(new Set(["alice"]));
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        "Issue #42: skipped 2 readiness reaction(s) without users (likely deleted accounts).",
+      );
+    });
+
+    it("should not log when all reactions have users", async () => {
+      mockLogger.info.mockClear();
+      mockClient.paginate.iterator = vi.fn().mockReturnValue({
+        async *[Symbol.asyncIterator]() {
+          yield {
+            data: [
+              { content: "+1", user: { login: "Alice" } },
+              { content: "+1", user: { login: "Bob" } },
+            ],
+          };
+        },
+      });
+
+      await issueOps.getDiscussionReadiness(testRef);
+      expect(mockLogger.info).not.toHaveBeenCalled();
     });
   });
 });
