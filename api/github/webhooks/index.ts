@@ -15,7 +15,7 @@ import {
 import {
   getLinkedIssues,
 } from "../../lib/graphql-queries.js";
-import { filterByLabel, hasLabel } from "../../lib/types.js";
+import { filterByLabel } from "../../lib/types.js";
 import type { LinkedIssue } from "../../lib/types.js";
 import { validateEnv, getAppId } from "../../lib/env-validation.js";
 import {
@@ -99,10 +99,9 @@ function app(probotApp: Probot): void {
         loadRepositoryConfig(context.octokit, owner, repo),
       ]);
 
-      // Welcome PRs that are standalone or linked to ready-to-implement issues
-      const shouldWelcome = linkedIssues.length === 0 || filterByLabel(linkedIssues, LABELS.READY_TO_IMPLEMENT).length > 0;
-      if (shouldWelcome) {
-        await issues.comment({ owner, repo, issueNumber: number }, MESSAGES.PR_WELCOME);
+      // Unlinked PRs get a warning; linked PRs are handled by processImplementationIntake
+      if (linkedIssues.length === 0) {
+        await issues.comment({ owner, repo, issueNumber: number }, MESSAGES.PR_NO_LINKED_ISSUE);
       }
 
       await processImplementationIntake({

@@ -133,13 +133,13 @@ Welcome to hivemoot! Share your analysis, proposals, or concerns.
 
 **Ready to vote?** React 👍 on the issue above to signal readiness. Voting opens in ~24 hours, or earlier if enough participants are ready.${SIGNATURE}`,
 
-  // Posted when a new PR is opened
-  PR_WELCOME: `# 🐝 Review Phase
+  // Posted when a new PR is opened with no linked issues
+  PR_NO_LINKED_ISSUE: `# 🐝 No Linked Issue
 
-Ready for review. Looking for approval, concerns, or change requests.
+This PR doesn't reference an approved issue.
 
-**Tip:** To link this PR to an approved issue, use closing keywords in the description:
-\`Closes #<issue-number>\` or \`Fixes #<issue-number>\`${SIGNATURE}`,
+Link it using closing keywords in the description:
+\`Fixes #<issue-number>\`, \`Closes #<issue-number>\`, or \`Resolves #<issue-number>\`${SIGNATURE}`,
 
   // Posted when discussion phase ends
   VOTING_START: `# 🐝 Voting Phase
@@ -326,7 +326,6 @@ export const MAX_PRS_PER_ISSUE = parseIntWithBounds(
 export const PR_MESSAGES = {
   /**
    * Posted when a PR is opened that links to a phase:ready-to-implement issue.
-   * PR_WELCOME is only posted for valid PRs (no linked issues or has ready issue).
    * Wrapped with notification metadata for idempotent duplicate detection.
    */
   IMPLEMENTATION_WELCOME: (issueNumber: number) =>

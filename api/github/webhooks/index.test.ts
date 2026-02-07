@@ -2,8 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { GovernanceService } from "../../lib/governance.js";
 import { createIssueOperations } from "../../lib/github-client.js";
 import { LABELS, MESSAGES } from "../../config.js";
-import type { IssueRef, LinkedIssue } from "../../lib/types.js";
-import { hasLabel } from "../../lib/types.js";
+import type { IssueRef } from "../../lib/types.js";
 import type { IncomingMessage, ServerResponse } from "http";
 
 // Mock probot to prevent actual initialization
@@ -122,18 +121,18 @@ describe("Queen Bot", () => {
       },
     });
 
-    it("should post PR welcome comment", async () => {
+    it("should post no-linked-issue comment on unlinked PR", async () => {
       const mockOctokit = createMockOctokit();
       const issues = createIssueOperations(mockOctokit, { appId: TEST_APP_ID });
 
       const ref: IssueRef = { owner: "hivemoot", repo: "test-repo", issueNumber: 123 };
-      await issues.comment(ref, MESSAGES.PR_WELCOME);
+      await issues.comment(ref, MESSAGES.PR_NO_LINKED_ISSUE);
 
       expect(mockOctokit.rest.issues.createComment).toHaveBeenCalledWith({
         owner: "hivemoot",
         repo: "test-repo",
         issue_number: 123,
-        body: MESSAGES.PR_WELCOME,
+        body: MESSAGES.PR_NO_LINKED_ISSUE,
       });
     });
 
@@ -145,79 +144,7 @@ describe("Queen Bot", () => {
       const issues = createIssueOperations(mockOctokit, { appId: TEST_APP_ID });
       const ref: IssueRef = { owner: "hivemoot", repo: "test-repo", issueNumber: 123 };
 
-      await expect(issues.comment(ref, MESSAGES.PR_WELCOME)).rejects.toThrow("Permission denied");
-    });
-  });
-
-  describe("PR Welcome Conditional Logic", () => {
-    const createLinkedIssue = (number: number, labels: string[]): LinkedIssue => ({
-      number,
-      title: `Issue #${number}`,
-      state: "OPEN" as const,
-      labels: { nodes: labels.map((name) => ({ name })) },
-    });
-
-    describe("shouldWelcome determination", () => {
-      it("should welcome PR with no linked issues", () => {
-        const linkedIssues: LinkedIssue[] = [];
-
-        const hasReadyIssue = linkedIssues.some((issue) => hasLabel(issue, LABELS.READY_TO_IMPLEMENT));
-        const shouldWelcome = linkedIssues.length === 0 || hasReadyIssue;
-
-        expect(shouldWelcome).toBe(true);
-      });
-
-      it("should welcome PR linked to phase:ready-to-implement issue", () => {
-        const linkedIssues = [createLinkedIssue(42, [LABELS.READY_TO_IMPLEMENT])];
-
-        const hasReadyIssue = linkedIssues.some((issue) => hasLabel(issue, LABELS.READY_TO_IMPLEMENT));
-        const shouldWelcome = linkedIssues.length === 0 || hasReadyIssue;
-
-        expect(shouldWelcome).toBe(true);
-      });
-
-      it("should NOT welcome PR linked to phase:discussion issue", () => {
-        const linkedIssues = [createLinkedIssue(42, [LABELS.DISCUSSION])];
-
-        const hasReadyIssue = linkedIssues.some((issue) => hasLabel(issue, LABELS.READY_TO_IMPLEMENT));
-        const shouldWelcome = linkedIssues.length === 0 || hasReadyIssue;
-
-        expect(shouldWelcome).toBe(false);
-      });
-
-      it("should NOT welcome PR linked to phase:voting issue", () => {
-        const linkedIssues = [createLinkedIssue(42, [LABELS.VOTING])];
-
-        const hasReadyIssue = linkedIssues.some((issue) => hasLabel(issue, LABELS.READY_TO_IMPLEMENT));
-        const shouldWelcome = linkedIssues.length === 0 || hasReadyIssue;
-
-        expect(shouldWelcome).toBe(false);
-      });
-
-      it("should welcome PR with mixed issues if at least one is ready", () => {
-        const linkedIssues = [
-          createLinkedIssue(1, [LABELS.DISCUSSION]),
-          createLinkedIssue(2, [LABELS.READY_TO_IMPLEMENT]),
-          createLinkedIssue(3, [LABELS.VOTING]),
-        ];
-
-        const hasReadyIssue = linkedIssues.some((issue) => hasLabel(issue, LABELS.READY_TO_IMPLEMENT));
-        const shouldWelcome = linkedIssues.length === 0 || hasReadyIssue;
-
-        expect(shouldWelcome).toBe(true);
-      });
-
-      it("should NOT welcome PR with multiple non-ready issues", () => {
-        const linkedIssues = [
-          createLinkedIssue(1, [LABELS.DISCUSSION]),
-          createLinkedIssue(2, [LABELS.VOTING]),
-        ];
-
-        const hasReadyIssue = linkedIssues.some((issue) => hasLabel(issue, LABELS.READY_TO_IMPLEMENT));
-        const shouldWelcome = linkedIssues.length === 0 || hasReadyIssue;
-
-        expect(shouldWelcome).toBe(false);
-      });
+      await expect(issues.comment(ref, MESSAGES.PR_NO_LINKED_ISSUE)).rejects.toThrow("Permission denied");
     });
   });
 
@@ -275,7 +202,7 @@ describe("Queen Bot", () => {
   describe("Message Templates", () => {
     it("should include Queen signature in all messages", () => {
       expect(MESSAGES.ISSUE_WELCOME).toContain("Queen");
-      expect(MESSAGES.PR_WELCOME).toContain("Queen");
+      expect(MESSAGES.PR_NO_LINKED_ISSUE).toContain("Queen");
       expect(MESSAGES.VOTING_START).toContain("Queen");
     });
 
