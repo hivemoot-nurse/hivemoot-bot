@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     # Manual trigger for testing
 
-# Prevent overlapping runs across governance workflows
+# Prevent overlapping runs of this workflow
 concurrency:
-  group: hivemoot-governance
+  group: hivemoot-cleanup-stale-prs
   cancel-in-progress: false
 
 jobs:
