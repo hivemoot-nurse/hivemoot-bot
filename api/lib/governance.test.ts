@@ -293,7 +293,7 @@ describe("GovernanceService", () => {
       expect(outcome).toBe("inconclusive");
       expect(mockIssues.transition).toHaveBeenCalledWith(testRef, {
         removeLabel: LABELS.VOTING,
-        addLabel: LABELS.INCONCLUSIVE,
+        addLabel: LABELS.EXTENDED_VOTING,
         comment: MESSAGES.votingEndInconclusive(votes),
         close: false,
         lock: false,
@@ -565,7 +565,7 @@ describe("GovernanceService", () => {
       expect(mockIssues.findVotingCommentId).toHaveBeenCalledWith(testRef);
       expect(mockIssues.getValidatedVoteCounts).toHaveBeenCalledWith(testRef, 12345);
       expect(mockIssues.transition).toHaveBeenCalledWith(testRef, {
-        removeLabel: LABELS.INCONCLUSIVE,
+        removeLabel: LABELS.EXTENDED_VOTING,
         addLabel: LABELS.READY_TO_IMPLEMENT,
         comment: MESSAGES.votingEndInconclusiveResolved(votes, "phase:ready-to-implement"),
         close: false,
@@ -581,7 +581,7 @@ describe("GovernanceService", () => {
 
       expect(outcome).toBe("rejected");
       expect(mockIssues.transition).toHaveBeenCalledWith(testRef, {
-        removeLabel: LABELS.INCONCLUSIVE,
+        removeLabel: LABELS.EXTENDED_VOTING,
         addLabel: LABELS.REJECTED,
         comment: MESSAGES.votingEndInconclusiveResolved(votes, "rejected"),
         close: true,
@@ -599,7 +599,7 @@ describe("GovernanceService", () => {
 
       expect(outcome).toBe("inconclusive");
       expect(mockIssues.transition).toHaveBeenCalledWith(testRef, {
-        removeLabel: LABELS.INCONCLUSIVE,
+        removeLabel: LABELS.EXTENDED_VOTING,
         addLabel: LABELS.INCONCLUSIVE,
         comment: MESSAGES.votingEndInconclusiveFinal(votes),
         close: true,
@@ -617,7 +617,7 @@ describe("GovernanceService", () => {
 
       expect(outcome).toBe("inconclusive");
       expect(mockIssues.transition).toHaveBeenCalledWith(testRef, {
-        removeLabel: LABELS.INCONCLUSIVE,
+        removeLabel: LABELS.EXTENDED_VOTING,
         addLabel: LABELS.INCONCLUSIVE,
         comment: MESSAGES.votingEndInconclusiveFinal(votes),
         close: true,
@@ -659,7 +659,7 @@ describe("GovernanceService", () => {
 
       expect(outcome).toBe("needs-more-discussion");
       expect(mockIssues.transition).toHaveBeenCalledWith(testRef, {
-        removeLabel: LABELS.INCONCLUSIVE,
+        removeLabel: LABELS.EXTENDED_VOTING,
         addLabel: LABELS.DISCUSSION,
         comment: MESSAGES.votingEndNeedsMoreDiscussion(votes),
         close: false,

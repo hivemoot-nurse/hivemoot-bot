@@ -225,7 +225,7 @@ describe("Queen Bot", () => {
       expect(rejectedMsg).toContain("Rejected");
 
       const inconclusiveMsg = MESSAGES.votingEndInconclusive({ thumbsUp: 3, thumbsDown: 3, confused: 0 });
-      expect(inconclusiveMsg).toContain("Inconclusive");
+      expect(inconclusiveMsg).toContain("Extended Voting");
     });
   });
 

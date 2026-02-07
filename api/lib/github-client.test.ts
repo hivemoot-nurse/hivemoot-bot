@@ -1241,11 +1241,11 @@ describe("IssueOperations", () => {
       expect(mockClient.rest.issues.removeLabel).not.toHaveBeenCalled();
     });
 
-    it("should skip removeLabel when same as addLabel (e.g., inconclusive final close)", async () => {
+    it("should skip removeLabel when same as addLabel (self-transition guard)", async () => {
       await issueOps.transition(testRef, {
-        removeLabel: "inconclusive",
-        addLabel: "inconclusive",
-        comment: "Extended voting also inconclusive",
+        removeLabel: "same-label",
+        addLabel: "same-label",
+        comment: "Self-transition test",
         close: true,
         lock: true,
       });

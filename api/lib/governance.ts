@@ -311,7 +311,7 @@ export class GovernanceService {
         lock: true,
       },
       inconclusive: {
-        label: LABELS.INCONCLUSIVE,
+        label: LABELS.EXTENDED_VOTING,
         message: earlyPrefix + inconclusiveMessage,
         close: false,
         lock: false,
@@ -422,7 +422,7 @@ export class GovernanceService {
 
     const config = outcomeConfig[outcome];
 
-    await this.applyTransition(ref, LABELS.INCONCLUSIVE, config);
+    await this.applyTransition(ref, LABELS.EXTENDED_VOTING, config);
 
     return outcome;
   }

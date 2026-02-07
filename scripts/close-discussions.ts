@@ -677,7 +677,7 @@ async function processRepository(
         earlyCheck: makeEarlyDecisionCheck((ref, opts) => governance.endVoting(ref, opts), earlyDecisionDeps),
       },
       {
-        label: LABELS.INCONCLUSIVE,
+        label: LABELS.EXTENDED_VOTING,
         durationMs: voting.durationMs,
         phaseName: "extended voting",
         transition: votingTransition((ref, opts) => governance.resolveInconclusive(ref, opts)),

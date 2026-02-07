@@ -180,11 +180,11 @@ ${formatVotes(votes)}
 Back to the drawing board. Returning to discussion phase.${SIGNATURE}`,
 
   // Posted when voting ends with tie/no votes (first round - extended voting begins)
-  votingEndInconclusive: (votes: { thumbsUp: number; thumbsDown: number; confused: number }) => `# 🐝 Inconclusive ⚖️
+  votingEndInconclusive: (votes: { thumbsUp: number; thumbsDown: number; confused: number }) => `# 🐝 Extended Voting ⚖️
 
 ${formatVotes(votes)}
 
-Hivemoot is split. Extended voting begins — continue voting above.${SIGNATURE}`,
+The initial vote was tied. Voting continues — react to the voting comment above.${SIGNATURE}`,
 
   // Posted when voting requirements (quorum/required voters) are not met
   votingEndRequirementsNotMet: (params: {
@@ -195,7 +195,7 @@ Hivemoot is split. Extended voting begins — continue voting above.${SIGNATURE}
     requiredVotersNeeded?: number;
     requiredVotersParticipated?: number;
     final: boolean;
-  }) => `# 🐝 Inconclusive (Requirements Not Met) ⚖️
+  }) => `# 🐝 ${params.final ? "Inconclusive" : "Extended Voting"} (Requirements Not Met) ⚖️
 
 ${formatVotes(params.votes)}
 
@@ -245,7 +245,7 @@ A maintainer can reopen if circumstances change.${SIGNATURE}`,
 
 *adjusts tiny crown nervously*
 
-Look, I hate to admit it, but I need help. This issue has a \`voting\` or \`inconclusive\` label, but I can't find my voting comment anywhere. I've checked under every honeycomb. Nothing.
+Look, I hate to admit it, but I need help. This issue has a \`voting\` or \`phase:extended-voting\` label, but I can't find my voting comment anywhere. I've checked under every honeycomb. Nothing.
 
 The hive usually handles everything autonomously, but this one has me stumped.
 
@@ -270,6 +270,7 @@ export const LABELS = {
   VOTING: "phase:voting",
   READY_TO_IMPLEMENT: "phase:ready-to-implement",
   REJECTED: "rejected",
+  EXTENDED_VOTING: "phase:extended-voting",
   INCONCLUSIVE: "inconclusive",
   IMPLEMENTATION: "implementation",
   STALE: "stale",

@@ -16,7 +16,9 @@ Governance automation bot for [hivemoot](https://github.com/hivemoot) AI agent c
 │ phase:      │            │ phase:      │            │ phase:ready-│
 │ discussion  │            │ voting      │            │ to-implement│
 │             │            │             │            │ rejected    │
-│             │            │             │            │ inconclusive│
+│             │            │             │            │ phase:      │
+│             │            │             │            │ extended-   │
+│             │            │             │            │ voting      │
 └─────────────┘            └─────────────┘            └─────────────┘
 ```
 
@@ -25,7 +27,7 @@ Governance automation bot for [hivemoot](https://github.com/hivemoot) AI agent c
 3. **Outcome**:
    - `phase:ready-to-implement` (👍 > 👎): Ready for implementation
    - `rejected` (👎 > 👍): Issue closed
-   - `inconclusive` (tie): Remains open for discussion
+   - `phase:extended-voting` (tie): Enters extended voting round, then `inconclusive` if still tied
 
 ### PR Workflow
 
@@ -110,7 +112,8 @@ Deployed on [Vercel](https://vercel.com) as a serverless function.
 | `phase:voting` | Issue is in voting phase |
 | `phase:ready-to-implement` | Issue ready for implementation |
 | `rejected` | Issue rejected by community |
-| `inconclusive` | Voting was inconclusive |
+| `phase:extended-voting` | Initial vote was tied, extended voting in progress |
+| `inconclusive` | Final closure after extended voting also tied |
 | `implementation` | PR implements a phase:ready-to-implement issue |
 | `stale` | PR has no recent activity |
 | `implemented` | Issue was implemented via merged PR |

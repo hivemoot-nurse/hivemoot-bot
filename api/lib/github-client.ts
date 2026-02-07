@@ -766,7 +766,7 @@ export class IssueOperations {
     }
 
     // Step 5: Remove old label LAST — safe because new label already present.
-    // Skip when same as addLabel (e.g., inconclusive→inconclusive final close)
+    // Skip when same as addLabel (self-transition guard)
     // to avoid removing the label we just added.
     if (options.removeLabel && options.removeLabel !== options.addLabel) {
       await this.removeLabel(ref, options.removeLabel);
