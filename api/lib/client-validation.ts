@@ -144,6 +144,14 @@ export const PR_CLIENT_CHECKS: ValidationCheck[] = [
     path: "rest.issues",
     requiredMethods: ["get", "addLabels", "removeLabel", "createComment", "listForRepo", "listComments"],
   },
+  {
+    path: "rest.checks",
+    requiredMethods: ["listForRef"],
+  },
+  {
+    path: "rest.repos",
+    requiredMethods: ["getCombinedStatusForRef"],
+  },
 ];
 
 /**

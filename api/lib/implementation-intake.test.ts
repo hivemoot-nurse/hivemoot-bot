@@ -40,6 +40,7 @@ describe("Implementation Intake", () => {
             created_at: "2026-02-01T00:00:00Z",
             updated_at: "2026-02-02T00:00:00Z",
             user: { login: "agent" },
+            head: { sha: "abc123" },
           },
         }),
         update: vi.fn().mockResolvedValue({}),
@@ -49,6 +50,12 @@ describe("Implementation Intake", () => {
       },
       reactions: {
         listForIssueComment: vi.fn().mockResolvedValue({ data: [] }),
+      },
+      checks: {
+        listForRef: vi.fn().mockResolvedValue({ data: { total_count: 0, check_runs: [] } }),
+      },
+      repos: {
+        getCombinedStatusForRef: vi.fn().mockResolvedValue({ data: { state: "pending", total_count: 0, statuses: [] } }),
       },
     },
     paginate: {
@@ -613,6 +620,7 @@ describe("Intake Methods", () => {
             created_at: "2026-02-01T00:00:00Z",
             updated_at: "2026-02-02T00:00:00Z",
             user: { login: "agent" },
+            head: { sha: "abc123" },
           },
         }),
         update: vi.fn().mockResolvedValue({}),
@@ -622,6 +630,12 @@ describe("Intake Methods", () => {
       },
       reactions: {
         listForIssueComment: vi.fn().mockResolvedValue({ data: [] }),
+      },
+      checks: {
+        listForRef: vi.fn().mockResolvedValue({ data: { total_count: 0, check_runs: [] } }),
+      },
+      repos: {
+        getCombinedStatusForRef: vi.fn().mockResolvedValue({ data: { state: "pending", total_count: 0, statuses: [] } }),
       },
     },
     paginate: {
@@ -1031,6 +1045,7 @@ describe("Leaderboard race condition fix", () => {
             created_at: "2026-02-01T00:00:00Z",
             updated_at: "2026-02-02T00:00:00Z",
             user: { login: "agent" },
+            head: { sha: "abc123" },
           },
         }),
         update: vi.fn().mockResolvedValue({}),
@@ -1040,6 +1055,12 @@ describe("Leaderboard race condition fix", () => {
       },
       reactions: {
         listForIssueComment: vi.fn().mockResolvedValue({ data: [] }),
+      },
+      checks: {
+        listForRef: vi.fn().mockResolvedValue({ data: { total_count: 0, check_runs: [] } }),
+      },
+      repos: {
+        getCombinedStatusForRef: vi.fn().mockResolvedValue({ data: { state: "pending", total_count: 0, statuses: [] } }),
       },
     },
     paginate: {

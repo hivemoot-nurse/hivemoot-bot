@@ -1,0 +1,165 @@
+/**
+ * Merge-Readiness Evaluation
+ *
+ * Determines whether a PR meets all technical prerequisites for merging
+ * and manages the `merge-ready` label accordingly.
+ *
+ * Conditions for the label (all must be true):
+ * 1. PR has `implementation` label (active competing PR)
+ * 2. All check runs on HEAD are completed with success/neutral/skipped
+ * 3. All commit statuses on HEAD are success (legacy Status API)
+ * 4. At least minApprovals approvals from trustedReviewers
+ *
+ * Short-circuit order optimized by API cost:
+ * config → labels → approvals (1 call) → CI (2 calls)
+ */
+
+import { LABELS } from "../config.js";
+import type { PRRef } from "./types.js";
+import type { PROperations } from "./pr-operations.js";
+import type { MergeReadyConfig } from "./repo-config.js";
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Types
+// ───────────────────────────────────────────────────────────────────────────────
+
+export interface MergeReadinessParams {
+  prs: PROperations;
+  ref: PRRef;
+  config: MergeReadyConfig | null;
+  trustedReviewers: string[];
+  /** Pre-fetched labels to avoid extra API call (from webhook payload). */
+  currentLabels?: string[];
+  /** HEAD SHA to check CI against. Fetched from PR if not provided. */
+  headSha?: string;
+  log?: { info: (msg: string) => void; debug?: (msg: string) => void };
+}
+
+export type MergeReadinessResult =
+  | { action: "skipped"; reason: string }
+  | { action: "added" }
+  | { action: "removed" }
+  | { action: "noop"; labeled: boolean };
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Evaluation
+// ───────────────────────────────────────────────────────────────────────────────
+
+/** Check run conclusions that count as passing. */
+const PASSING_CHECK_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
+
+/**
+ * Evaluate whether a PR meets all merge-readiness conditions and
+ * add or remove the `merge-ready` label accordingly.
+ *
+ * Idempotent: safe to call multiple times for the same PR.
+ */
+export async function evaluateMergeReadiness(
+  params: MergeReadinessParams
+): Promise<MergeReadinessResult> {
+  const { prs, ref, config, trustedReviewers, log } = params;
+
+  // 1. Feature disabled → skip
+  if (!config) {
+    return { action: "skipped", reason: "feature disabled" };
+  }
+
+  // 2. Check implementation label (use pre-fetched labels or fetch)
+  const labels = params.currentLabels ?? await prs.getLabels(ref);
+  const hasImplementation = labels.includes(LABELS.IMPLEMENTATION);
+  const hasMergeReady = labels.includes(LABELS.MERGE_READY);
+
+  if (!hasImplementation) {
+    if (hasMergeReady) {
+      await prs.removeLabel(ref, LABELS.MERGE_READY);
+      log?.info(`[PR #${ref.prNumber}] Removed merge-ready: no implementation label`);
+      return { action: "removed" };
+    }
+    return { action: "skipped", reason: "no implementation label" };
+  }
+
+  // 3. Check trusted approvals (1 API call)
+  const approvers = await prs.getApproverLogins(ref);
+  const trustedApprovalCount = trustedReviewers.filter((reviewer) =>
+    approvers.has(reviewer)
+  ).length;
+
+  if (trustedApprovalCount < config.minApprovals) {
+    if (hasMergeReady) {
+      await prs.removeLabel(ref, LABELS.MERGE_READY);
+      log?.info(
+        `[PR #${ref.prNumber}] Removed merge-ready: ${trustedApprovalCount}/${config.minApprovals} trusted approvals`
+      );
+      return { action: "removed" };
+    }
+    return {
+      action: "skipped",
+      reason: `insufficient approvals (${trustedApprovalCount}/${config.minApprovals})`,
+    };
+  }
+
+  // 4. Get HEAD SHA (use pre-fetched or fetch from PR)
+  const headSha = params.headSha ?? (await prs.get(ref)).headSha;
+
+  // 5. Check CI status (2 API calls in parallel)
+  const ciPassing = await isCIPassing(prs, ref, headSha);
+
+  if (!ciPassing) {
+    if (hasMergeReady) {
+      await prs.removeLabel(ref, LABELS.MERGE_READY);
+      log?.info(`[PR #${ref.prNumber}] Removed merge-ready: CI not passing`);
+      return { action: "removed" };
+    }
+    return { action: "skipped", reason: "CI not passing" };
+  }
+
+  // All conditions met → add label if not present
+  if (!hasMergeReady) {
+    await prs.addLabels(ref, [LABELS.MERGE_READY]);
+    log?.info(`[PR #${ref.prNumber}] Added merge-ready label`);
+    return { action: "added" };
+  }
+
+  return { action: "noop", labeled: true };
+}
+
+/**
+ * Check that all CI signals are passing for the given SHA.
+ *
+ * Queries both the Checks API (GitHub Actions) and the legacy Status API
+ * (external CI like Jenkins) in parallel. Both must pass.
+ *
+ * Zero checks/statuses = treated as passing (repo has no CI configured).
+ */
+async function isCIPassing(
+  prs: PROperations,
+  ref: PRRef,
+  sha: string
+): Promise<boolean> {
+  const [checksResult, statusResult] = await Promise.all([
+    prs.getCheckRunsForRef(ref.owner, ref.repo, sha),
+    prs.getCombinedStatus(ref.owner, ref.repo, sha),
+  ]);
+
+  // Fail-closed if check runs were truncated (>100) — we can't verify unseen checks
+  if (checksResult.totalCount > checksResult.checkRuns.length) {
+    return false;
+  }
+
+  // Check Runs: all must be completed with a passing conclusion
+  for (const checkRun of checksResult.checkRuns) {
+    if (checkRun.status !== "completed") {
+      return false;
+    }
+    if (!checkRun.conclusion || !PASSING_CHECK_CONCLUSIONS.has(checkRun.conclusion)) {
+      return false;
+    }
+  }
+
+  // Legacy Status API: combined state must be "success" or no statuses at all
+  if (statusResult.totalCount > 0 && statusResult.state !== "success") {
+    return false;
+  }
+
+  return true;
+}

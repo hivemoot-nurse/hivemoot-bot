@@ -28,6 +28,7 @@ export interface PRClient {
           created_at: string;
           updated_at: string;
           user: { login: string } | null;
+          head: { sha: string };
         };
       }>;
 
@@ -141,6 +142,40 @@ export interface PRClient {
         }>;
       }>;
     };
+    checks: {
+      listForRef: (params: {
+        owner: string;
+        repo: string;
+        ref: string;
+        per_page?: number;
+        page?: number;
+      }) => Promise<{
+        data: {
+          total_count: number;
+          check_runs: Array<{
+            id: number;
+            status: string;
+            conclusion: string | null;
+          }>;
+        };
+      }>;
+    };
+    repos: {
+      getCombinedStatusForRef: (params: {
+        owner: string;
+        repo: string;
+        ref: string;
+      }) => Promise<{
+        data: {
+          state: string;
+          total_count: number;
+          statuses: Array<{
+            state: string;
+            context: string;
+          }>;
+        };
+      }>;
+    };
   };
 }
 
@@ -198,6 +233,7 @@ export class PROperations {
     createdAt: Date;
     updatedAt: Date;
     author: string;
+    headSha: string;
   }> {
     const { data } = await this.client.rest.pulls.get({
       owner: ref.owner,
@@ -212,6 +248,7 @@ export class PROperations {
       createdAt: new Date(data.created_at),
       updatedAt: new Date(data.updated_at),
       author: data.user?.login ?? "unknown",
+      headSha: data.head.sha,
     };
   }
 
@@ -501,6 +538,47 @@ export class PROperations {
       (comment) => new Date(comment.created_at),
       fallback
     );
+  }
+
+  /**
+   * Get check runs for a given ref (SHA, branch, or tag).
+   * Used by merge-readiness to verify CI status.
+   */
+  async getCheckRunsForRef(
+    owner: string,
+    repo: string,
+    ref: string
+  ): Promise<{
+    totalCount: number;
+    checkRuns: Array<{ id: number; status: string; conclusion: string | null }>;
+  }> {
+    const { data } = await this.client.rest.checks.listForRef({
+      owner,
+      repo,
+      ref,
+      per_page: 100,
+    });
+    return { totalCount: data.total_count, checkRuns: data.check_runs };
+  }
+
+  /**
+   * Get combined commit status for a given ref (SHA, branch, or tag).
+   * Uses the legacy Status API for CI tools that don't use Check Runs.
+   */
+  async getCombinedStatus(
+    owner: string,
+    repo: string,
+    ref: string
+  ): Promise<{
+    state: string;
+    totalCount: number;
+  }> {
+    const { data } = await this.client.rest.repos.getCombinedStatusForRef({
+      owner,
+      repo,
+      ref,
+    });
+    return { state: data.state, totalCount: data.total_count };
   }
 
   /**

@@ -39,6 +39,9 @@ export const CONFIG_BOUNDS = {
     maxEntries: 20,
     maxUsernameLength: 39,
   },
+  mergeReady: {
+    minApprovals: { min: 1, max: 20, default: 1 },
+  },
   // LLM configuration bounds
   llmMaxTokens: {
     min: 500,
@@ -276,6 +279,7 @@ export const LABELS = {
   STALE: "stale",
   IMPLEMENTED: "implemented",
   BLOCKED_HUMAN_HELP: "blocked:human-help-needed",
+  MERGE_READY: "merge-ready",
 } as const;
 
 // ───────────────────────────────────────────────────────────────────────────────

@@ -36,6 +36,12 @@ describe("createPROperations", () => {
         listForRepo: vi.fn(),
         listComments: vi.fn(),
       },
+      checks: {
+        listForRef: vi.fn(),
+      },
+      repos: {
+        getCombinedStatusForRef: vi.fn(),
+      },
     },
   });
 
@@ -221,6 +227,7 @@ describe("PROperations", () => {
               created_at: "2024-01-10T08:00:00Z",
               updated_at: "2024-01-15T10:30:00Z",
               user: { login: "test-author" },
+              head: { sha: "abc123def456" },
             },
           }),
           update: vi.fn().mockResolvedValue({}),
@@ -235,6 +242,12 @@ describe("PROperations", () => {
           createComment: vi.fn().mockResolvedValue({}),
           listForRepo: vi.fn().mockResolvedValue({ data: [] }),
           listComments: vi.fn().mockResolvedValue({ data: [] }),
+        },
+        checks: {
+          listForRef: vi.fn().mockResolvedValue({ data: { total_count: 0, check_runs: [] } }),
+        },
+        repos: {
+          getCombinedStatusForRef: vi.fn().mockResolvedValue({ data: { state: "pending", total_count: 0, statuses: [] } }),
         },
       },
     } as unknown as PRClient;
@@ -253,6 +266,7 @@ describe("PROperations", () => {
         createdAt: new Date("2024-01-10T08:00:00Z"),
         updatedAt: new Date("2024-01-15T10:30:00Z"),
         author: "test-author",
+        headSha: "abc123def456",
       });
       expect(mockClient.rest.pulls.get).toHaveBeenCalledWith({
         owner: "test-org",
@@ -270,6 +284,7 @@ describe("PROperations", () => {
           created_at: "2024-01-10T08:00:00Z",
           updated_at: "2024-01-15T10:30:00Z",
           user: null,
+          head: { sha: "abc123" },
         },
       });
 
@@ -287,6 +302,7 @@ describe("PROperations", () => {
           created_at: "2024-01-10T08:00:00Z",
           updated_at: "2024-01-15T10:30:00Z",
           user: { login: "author" },
+          head: { sha: "abc123" },
         },
       });
 

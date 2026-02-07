@@ -43,6 +43,12 @@ interface IntakeMethodApproval {
 
 export type IntakeMethod = IntakeMethodUpdate | IntakeMethodApproval;
 
+// ── Merge-Ready Config ──────────────────────────────────────────────────
+
+export interface MergeReadyConfig {
+  minApprovals: number;
+}
+
 export interface VotingExit {
   afterMs: number;
   requires: ExitRequires;
@@ -80,6 +86,7 @@ export interface RepoConfigFile {
       maxPRsPerIssue?: number;
       trustedReviewers?: unknown;
       intake?: unknown;
+      mergeReady?: unknown;
     };
   };
 }
@@ -108,6 +115,7 @@ export interface EffectiveConfig {
       maxPRsPerIssue: number;
       trustedReviewers: string[];
       intake: IntakeMethod[];
+      mergeReady: MergeReadyConfig | null;
     };
   };
 }
@@ -724,6 +732,64 @@ function parseIntakeMethods(
 }
 
 /**
+ * Parse and validate mergeReady config from the pr section.
+ *
+ * Returns null (feature disabled) when:
+ * - mergeReady is absent, null, or undefined
+ * - trustedReviewers is empty (can't satisfy approval requirement)
+ * - mergeReady is not a valid object
+ *
+ * When present, minApprovals is clamped to [1, trustedReviewers.length].
+ */
+function parseMergeReadyConfig(
+  value: unknown,
+  trustedReviewers: string[],
+  repoFullName: string
+): MergeReadyConfig | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (typeof value !== "object" || Array.isArray(value)) {
+    logger.warn(
+      `[${repoFullName}] Invalid mergeReady: expected object. Disabling feature.`
+    );
+    return null;
+  }
+
+  if (trustedReviewers.length === 0) {
+    logger.warn(
+      `[${repoFullName}] mergeReady configured but trustedReviewers is empty. ` +
+      `Cannot satisfy approval requirement. Disabling feature.`
+    );
+    return null;
+  }
+
+  const obj = value as { minApprovals?: unknown };
+
+  let minApprovals: number;
+  if (obj.minApprovals === undefined || obj.minApprovals === null) {
+    minApprovals = CONFIG_BOUNDS.mergeReady.minApprovals.default;
+  } else if (typeof obj.minApprovals !== "number" || !Number.isFinite(obj.minApprovals)) {
+    logger.warn(
+      `[${repoFullName}] Invalid mergeReady.minApprovals: expected number. Using default (1).`
+    );
+    minApprovals = CONFIG_BOUNDS.mergeReady.minApprovals.default;
+  } else {
+    minApprovals = Math.round(obj.minApprovals);
+  }
+
+  // Clamp to [1, trustedReviewers.length]
+  minApprovals = clamp(
+    minApprovals,
+    CONFIG_BOUNDS.mergeReady.minApprovals.min,
+    Math.min(CONFIG_BOUNDS.mergeReady.minApprovals.max, trustedReviewers.length)
+  );
+
+  return { minApprovals };
+}
+
+/**
  * Parse and validate a RepoConfigFile object.
  * Returns EffectiveConfig with all values validated and clamped.
  *
@@ -736,10 +802,11 @@ function parseRepoConfig(raw: unknown, repoFullName: string): EffectiveConfig {
   const discussionExitsRaw = config?.governance?.proposals?.discussion?.exits;
   const discussionExits = parseDiscussionExits(discussionExitsRaw, DISCUSSION_DURATION_MS, repoFullName);
 
-  // Resolve PR settings (trustedReviewers parsed first — needed for intake clamping)
+  // Resolve PR settings (trustedReviewers parsed first — needed for intake and mergeReady clamping)
   const prConfig = config?.governance?.pr;
   const trustedReviewers = parseTrustedReviewers(prConfig?.trustedReviewers, repoFullName);
   const intake = parseIntakeMethods(prConfig?.intake, trustedReviewers, repoFullName);
+  const mergeReady = parseMergeReadyConfig(prConfig?.mergeReady, trustedReviewers, repoFullName);
 
   // Voting exits (default applied if missing)
   const exitsRaw = config?.governance?.proposals?.voting?.exits;
@@ -773,6 +840,7 @@ function parseRepoConfig(raw: unknown, repoFullName: string): EffectiveConfig {
         ),
         trustedReviewers,
         intake,
+        mergeReady,
       },
     },
   };
@@ -809,6 +877,7 @@ export function getDefaultConfig(): EffectiveConfig {
         maxPRsPerIssue: MAX_PRS_PER_ISSUE,
         trustedReviewers: [],
         intake: [{ method: "update" }],
+        mergeReady: null,
       },
     },
   };

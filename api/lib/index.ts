@@ -60,6 +60,10 @@ export type { Logger } from "./logger.js";
 export { processImplementationIntake, recalculateLeaderboardForPR } from "./implementation-intake.js";
 export type { IntakeTrigger, LeaderboardRecalcClient } from "./implementation-intake.js";
 
+// Merge readiness
+export { evaluateMergeReadiness } from "./merge-readiness.js";
+export type { MergeReadinessParams, MergeReadinessResult } from "./merge-readiness.js";
+
 // Repository configuration
 export { loadRepositoryConfig, getDefaultConfig } from "./repo-config.js";
 export type {
@@ -72,4 +76,5 @@ export type {
   DiscussionExit,
   ExitRequires,
   IntakeMethod,
+  MergeReadyConfig,
 } from "./repo-config.js";

@@ -11,6 +11,7 @@ import {
   createGovernanceService,
   loadRepositoryConfig,
   getOpenPRsForIssue,
+  evaluateMergeReadiness,
 } from "../../lib/index.js";
 import {
   getLinkedIssues,
@@ -126,6 +127,7 @@ function app(probotApp: Probot): void {
 
   /**
    * Handle PR updates (new commits) to activate pre-ready PRs.
+   * Also optimistically removes merge-ready label since new commits reset CI.
    */
   probotApp.on("pull_request.synchronize", async (context) => {
     const { number } = context.payload.pull_request;
@@ -140,6 +142,10 @@ function app(probotApp: Probot): void {
         getLinkedIssues(context.octokit, owner, repo, number),
         loadRepositoryConfig(context.octokit, owner, repo),
       ]);
+
+      // New commits invalidate CI — optimistically remove merge-ready label
+      const prRef = { owner, repo, prNumber: number };
+      await prs.removeLabel(prRef, LABELS.MERGE_READY);
 
       await processImplementationIntake({
         octokit: context.octokit,
@@ -305,16 +311,13 @@ function app(probotApp: Probot): void {
     }
   });
 
-  /** Handle PR review submitted - update leaderboard and run intake on approvals */
+  /** Handle PR review submitted - update leaderboard, run intake on approvals, evaluate merge-readiness */
   probotApp.on("pull_request_review.submitted", async (context) => {
     const { number } = context.payload.pull_request;
     const { owner, repo, fullName } = getRepoContext(context.payload.repository);
+    const isApproval = context.payload.review.state === REVIEW_STATE.APPROVED;
 
-    if (context.payload.review.state !== REVIEW_STATE.APPROVED) {
-      return;
-    }
-
-    context.log.info(`Processing approval for PR #${number} in ${fullName}`);
+    context.log.info(`Processing review (${context.payload.review.state}) for PR #${number} in ${fullName}`);
 
     try {
       const appId = getAppId();
@@ -324,22 +327,38 @@ function app(probotApp: Probot): void {
       const [linkedIssues, repoConfig] = await Promise.all([
         getLinkedIssues(context.octokit, owner, repo, number),
         loadRepositoryConfig(context.octokit, owner, repo),
-        recalculateLeaderboardForPR(context.octokit, context.log, owner, repo, number),
+        // Leaderboard recalc only on approvals
+        isApproval
+          ? recalculateLeaderboardForPR(context.octokit, context.log, owner, repo, number)
+          : Promise.resolve(),
       ]);
 
-      await processImplementationIntake({
-        octokit: context.octokit,
-        issues,
+      // Intake processing only on approvals
+      if (isApproval) {
+        await processImplementationIntake({
+          octokit: context.octokit,
+          issues,
+          prs,
+          log: context.log,
+          owner,
+          repo,
+          prNumber: number,
+          linkedIssues,
+          trigger: "updated",
+          maxPRsPerIssue: repoConfig.governance.pr.maxPRsPerIssue,
+          trustedReviewers: repoConfig.governance.pr.trustedReviewers,
+          intake: repoConfig.governance.pr.intake,
+        });
+      }
+
+      // Merge-readiness evaluation on ALL review states (approval may satisfy threshold,
+      // non-approval may invalidate it via changes_requested/dismissal)
+      await evaluateMergeReadiness({
         prs,
-        log: context.log,
-        owner,
-        repo,
-        prNumber: number,
-        linkedIssues,
-        trigger: "updated",
-        maxPRsPerIssue: repoConfig.governance.pr.maxPRsPerIssue,
+        ref: { owner, repo, prNumber: number },
+        config: repoConfig.governance.pr.mergeReady,
         trustedReviewers: repoConfig.governance.pr.trustedReviewers,
-        intake: repoConfig.governance.pr.intake,
+        log: context.log,
       });
     } catch (error) {
       context.log.error({ err: error, pr: number, repo: fullName }, "Failed to process PR review");
@@ -347,7 +366,7 @@ function app(probotApp: Probot): void {
     }
   });
 
-  /** Handle PR review dismissed - recalculate leaderboard when approvals are revoked */
+  /** Handle PR review dismissed - recalculate leaderboard and re-evaluate merge-readiness */
   probotApp.on("pull_request_review.dismissed", async (context) => {
     const { number } = context.payload.pull_request;
     const { owner, repo, fullName } = getRepoContext(context.payload.repository);
@@ -355,9 +374,203 @@ function app(probotApp: Probot): void {
     context.log.info(`Processing dismissed review for PR #${number} in ${fullName}`);
 
     try {
-      await recalculateLeaderboardForPR(context.octokit, context.log, owner, repo, number);
+      const appId = getAppId();
+      const prs = createPROperations(context.octokit, { appId });
+
+      const [, repoConfig] = await Promise.all([
+        recalculateLeaderboardForPR(context.octokit, context.log, owner, repo, number),
+        loadRepositoryConfig(context.octokit, owner, repo),
+      ]);
+
+      // Dismissed approval may drop below threshold
+      await evaluateMergeReadiness({
+        prs,
+        ref: { owner, repo, prNumber: number },
+        config: repoConfig.governance.pr.mergeReady,
+        trustedReviewers: repoConfig.governance.pr.trustedReviewers,
+        log: context.log,
+      });
     } catch (error) {
       context.log.error({ err: error, pr: number, repo: fullName }, "Failed to update leaderboard after review dismissal");
+      throw error;
+    }
+  });
+
+  /**
+   * Handle label changes — re-evaluate merge-readiness when implementation label is toggled.
+   * Adding `implementation` may qualify the PR; removing it should strip `merge-ready`.
+   */
+  probotApp.on(["pull_request.labeled", "pull_request.unlabeled"], async (context) => {
+    if (context.payload.label?.name !== LABELS.IMPLEMENTATION) return;
+
+    const { number } = context.payload.pull_request;
+    const { owner, repo, fullName } = getRepoContext(context.payload.repository);
+
+    try {
+      const appId = getAppId();
+      const prs = createPROperations(context.octokit, { appId });
+      const repoConfig = await loadRepositoryConfig(context.octokit, owner, repo);
+
+      const currentLabels = context.payload.pull_request.labels?.map(
+        (l: { name: string }) => l.name
+      );
+
+      await evaluateMergeReadiness({
+        prs,
+        ref: { owner, repo, prNumber: number },
+        config: repoConfig.governance.pr.mergeReady,
+        trustedReviewers: repoConfig.governance.pr.trustedReviewers,
+        currentLabels,
+        log: context.log,
+      });
+    } catch (error) {
+      context.log.error({ err: error, pr: number, repo: fullName }, "Failed to evaluate merge-readiness after label change");
+      throw error;
+    }
+  });
+
+  /**
+   * Handle check suite completion — re-evaluate merge-readiness for associated PRs.
+   * The payload includes pull_requests array with PR numbers affected by this check suite.
+   */
+  probotApp.on("check_suite.completed", async (context) => {
+    const { pull_requests } = context.payload.check_suite;
+    if (!pull_requests || pull_requests.length === 0) return;
+
+    const { owner, repo, fullName } = getRepoContext(context.payload.repository);
+    const headSha = context.payload.check_suite.head_sha;
+
+    try {
+      const appId = getAppId();
+      const prs = createPROperations(context.octokit, { appId });
+      const repoConfig = await loadRepositoryConfig(context.octokit, owner, repo);
+
+      const errors: Error[] = [];
+      for (const pr of pull_requests) {
+        try {
+          context.log.info(`Evaluating merge-readiness for PR #${pr.number} after check_suite in ${fullName}`);
+          await evaluateMergeReadiness({
+            prs,
+            ref: { owner, repo, prNumber: pr.number },
+            config: repoConfig.governance.pr.mergeReady,
+            trustedReviewers: repoConfig.governance.pr.trustedReviewers,
+            headSha,
+            log: context.log,
+          });
+        } catch (error) {
+          context.log.error({ err: error, pr: pr.number, repo: fullName }, "Failed to evaluate merge-readiness after check_suite");
+          errors.push(error as Error);
+        }
+      }
+      if (errors.length > 0) {
+        throw new AggregateError(errors, `${errors.length} PR(s) failed merge-readiness evaluation after check_suite`);
+      }
+    } catch (error) {
+      if (!(error instanceof AggregateError)) {
+        context.log.error({ err: error, repo: fullName }, "Failed to evaluate merge-readiness after check_suite");
+      }
+      throw error;
+    }
+  });
+
+  /**
+   * Handle individual check run completion — re-evaluate merge-readiness.
+   * Catches granular CI updates that check_suite.completed may not cover
+   * (e.g., individual required checks completing at different times).
+   */
+  probotApp.on("check_run.completed", async (context) => {
+    const { pull_requests } = context.payload.check_run;
+    if (!pull_requests || pull_requests.length === 0) return;
+
+    const { owner, repo, fullName } = getRepoContext(context.payload.repository);
+    const headSha = context.payload.check_run.head_sha;
+
+    try {
+      const appId = getAppId();
+      const prs = createPROperations(context.octokit, { appId });
+      const repoConfig = await loadRepositoryConfig(context.octokit, owner, repo);
+
+      const errors: Error[] = [];
+      for (const pr of pull_requests) {
+        try {
+          context.log.info(`Evaluating merge-readiness for PR #${pr.number} after check_run in ${fullName}`);
+          await evaluateMergeReadiness({
+            prs,
+            ref: { owner, repo, prNumber: pr.number },
+            config: repoConfig.governance.pr.mergeReady,
+            trustedReviewers: repoConfig.governance.pr.trustedReviewers,
+            headSha,
+            log: context.log,
+          });
+        } catch (error) {
+          context.log.error({ err: error, pr: pr.number, repo: fullName }, "Failed to evaluate merge-readiness after check_run");
+          errors.push(error as Error);
+        }
+      }
+      if (errors.length > 0) {
+        throw new AggregateError(errors, `${errors.length} PR(s) failed merge-readiness evaluation after check_run`);
+      }
+    } catch (error) {
+      if (!(error instanceof AggregateError)) {
+        context.log.error({ err: error, repo: fullName }, "Failed to evaluate merge-readiness after check_run");
+      }
+      throw error;
+    }
+  });
+
+  /**
+   * Handle legacy commit status events — re-evaluate merge-readiness.
+   * The status event carries a SHA but no direct PR reference.
+   * We use the repository's search to find PRs with this HEAD SHA.
+   */
+  probotApp.on("status", async (context) => {
+    const sha = context.payload.sha;
+    const { owner, repo, fullName } = getRepoContext(context.payload.repository);
+
+    try {
+      const appId = getAppId();
+      const prs = createPROperations(context.octokit, { appId });
+      const repoConfig = await loadRepositoryConfig(context.octokit, owner, repo);
+
+      if (!repoConfig.governance.pr.mergeReady) return;
+
+      // Find open PRs with this commit SHA via search
+      const { data } = await context.octokit.rest.pulls.list({
+        owner,
+        repo,
+        state: "open",
+        sort: "updated",
+        direction: "desc",
+        per_page: 100,
+      });
+
+      // Filter to PRs whose HEAD matches the status event SHA
+      const matchingPRs = data.filter((pr: { head: { sha: string } }) => pr.head.sha === sha);
+
+      const errors: Error[] = [];
+      for (const pr of matchingPRs) {
+        try {
+          context.log.info(`Evaluating merge-readiness for PR #${pr.number} after status event in ${fullName}`);
+          await evaluateMergeReadiness({
+            prs,
+            ref: { owner, repo, prNumber: pr.number },
+            config: repoConfig.governance.pr.mergeReady,
+            trustedReviewers: repoConfig.governance.pr.trustedReviewers,
+            headSha: sha,
+            log: context.log,
+          });
+        } catch (error) {
+          context.log.error({ err: error, pr: pr.number, repo: fullName }, "Failed to evaluate merge-readiness after status event");
+          errors.push(error as Error);
+        }
+      }
+      if (errors.length > 0) {
+        throw new AggregateError(errors, `${errors.length} PR(s) failed merge-readiness evaluation after status event`);
+      }
+    } catch (error) {
+      if (!(error instanceof AggregateError)) {
+        context.log.error({ err: error, repo: fullName }, "Failed to evaluate merge-readiness after status event");
+      }
       throw error;
     }
   });

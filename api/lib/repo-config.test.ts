@@ -1539,5 +1539,160 @@ governance:
         expect(config.governance.pr.intake).toEqual([{ method: "update" }]);
       });
     });
+
+    describe("mergeReady parsing", () => {
+      it("should default to null when mergeReady is not configured", async () => {
+        const configYaml = `
+governance:
+  pr:
+    staleDays: 5
+`;
+        const octokit = createMockOctokit({
+          data: { type: "file", content: encodeBase64(configYaml), encoding: "base64" },
+        });
+
+        const config = await loadRepositoryConfig(octokit, "owner", "repo");
+        expect(config.governance.pr.mergeReady).toBeNull();
+      });
+
+      it("should parse mergeReady with minApprovals", async () => {
+        const configYaml = `
+governance:
+  pr:
+    trustedReviewers:
+      - alice
+      - bob
+    mergeReady:
+      minApprovals: 2
+`;
+        const octokit = createMockOctokit({
+          data: { type: "file", content: encodeBase64(configYaml), encoding: "base64" },
+        });
+
+        const config = await loadRepositoryConfig(octokit, "owner", "repo");
+        expect(config.governance.pr.mergeReady).toEqual({ minApprovals: 2 });
+      });
+
+      it("should default minApprovals to 1 when not specified", async () => {
+        const configYaml = `
+governance:
+  pr:
+    trustedReviewers:
+      - alice
+    mergeReady: {}
+`;
+        const octokit = createMockOctokit({
+          data: { type: "file", content: encodeBase64(configYaml), encoding: "base64" },
+        });
+
+        const config = await loadRepositoryConfig(octokit, "owner", "repo");
+        expect(config.governance.pr.mergeReady).toEqual({ minApprovals: 1 });
+      });
+
+      it("should clamp minApprovals to trustedReviewers.length", async () => {
+        const configYaml = `
+governance:
+  pr:
+    trustedReviewers:
+      - alice
+      - bob
+    mergeReady:
+      minApprovals: 10
+`;
+        const octokit = createMockOctokit({
+          data: { type: "file", content: encodeBase64(configYaml), encoding: "base64" },
+        });
+
+        const config = await loadRepositoryConfig(octokit, "owner", "repo");
+        expect(config.governance.pr.mergeReady).toEqual({ minApprovals: 2 });
+      });
+
+      it("should clamp minApprovals minimum to 1", async () => {
+        const configYaml = `
+governance:
+  pr:
+    trustedReviewers:
+      - alice
+    mergeReady:
+      minApprovals: 0
+`;
+        const octokit = createMockOctokit({
+          data: { type: "file", content: encodeBase64(configYaml), encoding: "base64" },
+        });
+
+        const config = await loadRepositoryConfig(octokit, "owner", "repo");
+        expect(config.governance.pr.mergeReady).toEqual({ minApprovals: 1 });
+      });
+
+      it("should disable feature when trustedReviewers is empty", async () => {
+        const configYaml = `
+governance:
+  pr:
+    mergeReady:
+      minApprovals: 1
+`;
+        const octokit = createMockOctokit({
+          data: { type: "file", content: encodeBase64(configYaml), encoding: "base64" },
+        });
+
+        const config = await loadRepositoryConfig(octokit, "owner", "repo");
+        expect(config.governance.pr.mergeReady).toBeNull();
+      });
+
+      it("should disable feature when mergeReady is not an object", async () => {
+        const configYaml = `
+governance:
+  pr:
+    trustedReviewers:
+      - alice
+    mergeReady: "enabled"
+`;
+        const octokit = createMockOctokit({
+          data: { type: "file", content: encodeBase64(configYaml), encoding: "base64" },
+        });
+
+        const config = await loadRepositoryConfig(octokit, "owner", "repo");
+        expect(config.governance.pr.mergeReady).toBeNull();
+      });
+
+      it("should disable feature when mergeReady is an array", async () => {
+        const configYaml = `
+governance:
+  pr:
+    trustedReviewers:
+      - alice
+    mergeReady:
+      - minApprovals: 1
+`;
+        const octokit = createMockOctokit({
+          data: { type: "file", content: encodeBase64(configYaml), encoding: "base64" },
+        });
+
+        const config = await loadRepositoryConfig(octokit, "owner", "repo");
+        expect(config.governance.pr.mergeReady).toBeNull();
+      });
+
+      it("should default minApprovals when value is not a number", async () => {
+        const configYaml = `
+governance:
+  pr:
+    trustedReviewers:
+      - alice
+    mergeReady:
+      minApprovals: "one"
+`;
+        const octokit = createMockOctokit({
+          data: { type: "file", content: encodeBase64(configYaml), encoding: "base64" },
+        });
+
+        const config = await loadRepositoryConfig(octokit, "owner", "repo");
+        expect(config.governance.pr.mergeReady).toEqual({ minApprovals: 1 });
+      });
+
+      it("should return null mergeReady in default config", () => {
+        const defaults = getDefaultConfig();
+        expect(defaults.governance.pr.mergeReady).toBeNull();
+      });
+    });
   });
 });
