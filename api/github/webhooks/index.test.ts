@@ -213,7 +213,7 @@ describe("Queen Bot", () => {
     });
 
     it("should format vote results correctly", () => {
-      const votes = { thumbsUp: 5, thumbsDown: 2, confused: 1 };
+      const votes = { thumbsUp: 5, thumbsDown: 2, confused: 1, eyes: 0 };
 
       const readyMsg = MESSAGES.votingEndReadyToImplement(votes);
       expect(readyMsg).toContain("👍 5");
@@ -224,7 +224,7 @@ describe("Queen Bot", () => {
       const rejectedMsg = MESSAGES.votingEndRejected(votes);
       expect(rejectedMsg).toContain("Rejected");
 
-      const inconclusiveMsg = MESSAGES.votingEndInconclusive({ thumbsUp: 3, thumbsDown: 3, confused: 0 });
+      const inconclusiveMsg = MESSAGES.votingEndInconclusive({ thumbsUp: 3, thumbsDown: 3, confused: 0, eyes: 0 });
       expect(inconclusiveMsg).toContain("Extended Voting");
     });
   });

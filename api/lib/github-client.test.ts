@@ -344,7 +344,7 @@ describe("IssueOperations", () => {
     it("should return reaction counts from issue", async () => {
       const votes = await issueOps.getVoteCounts(testRef);
 
-      expect(votes).toEqual({ thumbsUp: 5, thumbsDown: 2, confused: 1 });
+      expect(votes).toEqual({ thumbsUp: 5, thumbsDown: 2, confused: 1, eyes: 0 });
     });
 
     it("should return zeros when no reactions", async () => {
@@ -354,7 +354,7 @@ describe("IssueOperations", () => {
 
       const votes = await issueOps.getVoteCounts(testRef);
 
-      expect(votes).toEqual({ thumbsUp: 0, thumbsDown: 0, confused: 0 });
+      expect(votes).toEqual({ thumbsUp: 0, thumbsDown: 0, confused: 0, eyes: 0 });
     });
   });
 
@@ -940,7 +940,7 @@ describe("IssueOperations", () => {
 
       const result = await issueOps.getValidatedVoteCounts(testRef, 200);
 
-      expect(result.votes).toEqual({ thumbsUp: 1, thumbsDown: 1, confused: 1 });
+      expect(result.votes).toEqual({ thumbsUp: 1, thumbsDown: 1, confused: 1, eyes: 0 });
       expect(result.voters).toEqual(expect.arrayContaining(["alice", "bob", "charlie"]));
       expect(result.voters).toHaveLength(3);
       expect(result.participants).toEqual(expect.arrayContaining(["alice", "bob", "charlie"]));
@@ -962,7 +962,7 @@ describe("IssueOperations", () => {
 
       const result = await issueOps.getValidatedVoteCounts(testRef, 200);
 
-      expect(result.votes).toEqual({ thumbsUp: 2, thumbsDown: 0, confused: 0 });
+      expect(result.votes).toEqual({ thumbsUp: 2, thumbsDown: 0, confused: 0, eyes: 0 });
       expect(result.voters).toEqual(expect.arrayContaining(["alice", "bob"]));
       expect(result.voters).toHaveLength(2);
       expect(result.participants).toEqual(expect.arrayContaining(["alice", "bob"]));
@@ -984,7 +984,7 @@ describe("IssueOperations", () => {
 
       const result = await issueOps.getValidatedVoteCounts(testRef, 200);
 
-      expect(result.votes).toEqual({ thumbsUp: 1, thumbsDown: 0, confused: 0 }); // only Bob
+      expect(result.votes).toEqual({ thumbsUp: 1, thumbsDown: 0, confused: 0, eyes: 0 }); // only Bob
       expect(result.voters).toEqual(["bob"]);
       expect(result.participants).toEqual(expect.arrayContaining(["alice", "bob"]));
       expect(result.participants).toHaveLength(2);
@@ -1005,9 +1005,50 @@ describe("IssueOperations", () => {
 
       const result = await issueOps.getValidatedVoteCounts(testRef, 200);
 
-      expect(result.votes).toEqual({ thumbsUp: 0, thumbsDown: 0, confused: 0 });
+      expect(result.votes).toEqual({ thumbsUp: 0, thumbsDown: 0, confused: 0, eyes: 0 });
       expect(result.voters).toEqual([]);
       expect(result.participants).toEqual(["spammer"]);
+    });
+
+    it("should count eyes reactions", async () => {
+      mockClient.paginate.iterator = vi.fn().mockReturnValue({
+        async *[Symbol.asyncIterator]() {
+          yield {
+            data: [
+              { content: "+1", user: { login: "Alice" } },
+              { content: "eyes", user: { login: "Bob" } },
+              { content: "eyes", user: { login: "Charlie" } },
+            ],
+          };
+        },
+      });
+
+      const result = await issueOps.getValidatedVoteCounts(testRef, 200);
+
+      expect(result.votes).toEqual({ thumbsUp: 1, thumbsDown: 0, confused: 0, eyes: 2 });
+      expect(result.voters).toEqual(expect.arrayContaining(["alice", "bob", "charlie"]));
+      expect(result.voters).toHaveLength(3);
+    });
+
+    it("should discard user who reacts with both eyes and thumbsUp", async () => {
+      mockClient.paginate.iterator = vi.fn().mockReturnValue({
+        async *[Symbol.asyncIterator]() {
+          yield {
+            data: [
+              { content: "+1", user: { login: "Alice" } },
+              { content: "eyes", user: { login: "Alice" } },  // multi-reaction — discard
+              { content: "eyes", user: { login: "Bob" } },     // single reaction — counts
+            ],
+          };
+        },
+      });
+
+      const result = await issueOps.getValidatedVoteCounts(testRef, 200);
+
+      expect(result.votes).toEqual({ thumbsUp: 0, thumbsDown: 0, confused: 0, eyes: 1 }); // only Bob
+      expect(result.voters).toEqual(["bob"]);
+      expect(result.participants).toEqual(expect.arrayContaining(["alice", "bob"]));
+      expect(result.participants).toHaveLength(2);
     });
 
     it("should ignore non-voting reactions", async () => {
@@ -1025,7 +1066,7 @@ describe("IssueOperations", () => {
 
       const result = await issueOps.getValidatedVoteCounts(testRef, 200);
 
-      expect(result.votes).toEqual({ thumbsUp: 1, thumbsDown: 0, confused: 0 });
+      expect(result.votes).toEqual({ thumbsUp: 1, thumbsDown: 0, confused: 0, eyes: 0 });
       expect(result.voters).toEqual(["alice"]);
       expect(result.participants).toEqual(["alice"]); // Bob has no voting reactions
     });
@@ -1044,7 +1085,7 @@ describe("IssueOperations", () => {
 
       const result = await issueOps.getValidatedVoteCounts(testRef, 200);
 
-      expect(result.votes).toEqual({ thumbsUp: 1, thumbsDown: 0, confused: 0 });
+      expect(result.votes).toEqual({ thumbsUp: 1, thumbsDown: 0, confused: 0, eyes: 0 });
       expect(result.voters).toEqual(["alice"]);
     });
 
@@ -1059,7 +1100,7 @@ describe("IssueOperations", () => {
       const result = await issueOps.getValidatedVoteCounts(testRef, 200);
 
       // Alice reacted with both +1 and -1 across pages — should be discarded
-      expect(result.votes).toEqual({ thumbsUp: 0, thumbsDown: 0, confused: 0 });
+      expect(result.votes).toEqual({ thumbsUp: 0, thumbsDown: 0, confused: 0, eyes: 0 });
       expect(result.voters).toEqual([]);
       expect(result.participants).toEqual(["alice"]);
     });
@@ -1073,7 +1114,7 @@ describe("IssueOperations", () => {
 
       const result = await issueOps.getValidatedVoteCounts(testRef, 200);
 
-      expect(result.votes).toEqual({ thumbsUp: 0, thumbsDown: 0, confused: 0 });
+      expect(result.votes).toEqual({ thumbsUp: 0, thumbsDown: 0, confused: 0, eyes: 0 });
       expect(result.voters).toEqual([]);
       expect(result.participants).toEqual([]);
     });

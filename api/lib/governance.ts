@@ -323,6 +323,12 @@ export class GovernanceService {
         lock: false,
         unlock: true,
       },
+      "needs-human-input": {
+        label: LABELS.NEEDS_HUMAN_INPUT,
+        message: earlyPrefix + MESSAGES.votingEndNeedsHumanInput(validated.votes),
+        close: false,
+        lock: false,
+      },
     };
 
     const config = outcomeConfig[outcome];
@@ -417,6 +423,12 @@ export class GovernanceService {
         close: false,
         lock: false,
         unlock: true,
+      },
+      "needs-human-input": {
+        label: LABELS.NEEDS_HUMAN_INPUT,
+        message: MESSAGES.votingEndInconclusiveResolved(validated.votes, "needs-human-input"),
+        close: false,
+        lock: false,
       },
     };
 
@@ -556,10 +568,11 @@ export class GovernanceService {
    * Determine voting outcome based on reaction counts.
    *
    * Priority order:
-   * 1. needs-more-discussion: 😕 > (👍 + 👎) - majority wants more discussion
-   * 2. ready-to-implement: 👍 > 👎
-   * 3. rejected: 👎 > 👍
-   * 4. inconclusive: 👍 = 👎 (triggers extended voting)
+   * 1. needs-human-input: 👀 > (👍 + 👎 + 😕) - hive wants human review
+   * 2. needs-more-discussion: 😕 > (👍 + 👎) - majority wants more discussion
+   * 3. ready-to-implement: 👍 > 👎
+   * 4. rejected: 👎 > 👍
+   * 5. inconclusive: 👍 = 👎 (triggers extended voting)
    *
    * Note: "skipped" is never returned here - it's only used when the voting
    * comment is missing (handled before this method is called).
@@ -567,7 +580,11 @@ export class GovernanceService {
   private determineOutcome(
     votes: VoteCounts,
   ): Exclude<VotingOutcome, "skipped"> {
-    // Check for majority abstain first - community needs more discussion
+    // Check for eyes majority first - hive wants human input
+    if (votes.eyes > votes.thumbsUp + votes.thumbsDown + votes.confused) {
+      return "needs-human-input";
+    }
+    // Check for majority abstain - community needs more discussion
     if (votes.confused > votes.thumbsUp + votes.thumbsDown) {
       return "needs-more-discussion";
     }
@@ -609,7 +626,7 @@ function earlyDecisionReason(config?: EndVotingOptions["votingConfig"]): string 
  * Check if votes are unanimous — exactly one reaction type has votes.
  */
 export function isUnanimous(votes: VoteCounts): boolean {
-  const counts = [votes.thumbsUp, votes.thumbsDown, votes.confused];
+  const counts = [votes.thumbsUp, votes.thumbsDown, votes.confused, votes.eyes];
   return counts.filter(c => c > 0).length === 1;
 }
 
@@ -617,10 +634,12 @@ export function isUnanimous(votes: VoteCounts): boolean {
  * Check if votes produce a decisive outcome (not a tie).
  *
  * Returns true when the vote distribution would resolve to any outcome
- * other than "inconclusive" — i.e., confused majority, thumbsUp wins,
- * or thumbsDown wins. Returns false only for a thumbsUp/thumbsDown tie.
+ * other than "inconclusive" — i.e., eyes majority, confused majority,
+ * thumbsUp wins, or thumbsDown wins. Returns false only for a
+ * thumbsUp/thumbsDown tie.
  */
 export function isDecisive(votes: VoteCounts): boolean {
+  if (votes.eyes > votes.thumbsUp + votes.thumbsDown + votes.confused) return true;
   if (votes.confused > votes.thumbsUp + votes.thumbsDown) return true;
   return votes.thumbsUp !== votes.thumbsDown;
 }

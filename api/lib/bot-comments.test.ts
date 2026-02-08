@@ -21,10 +21,13 @@ import {
   isHumanHelpComment,
   isNotificationComment,
   selectCurrentVotingComment,
+  createStandupMetadata,
+  generateMetadataTag,
   type CommentMetadata,
   type VotingMetadata,
   type HumanHelpMetadata,
   type NotificationMetadata,
+  type StandupMetadata,
   type VotingCommentInfo,
 } from "./bot-comments.js";
 
@@ -781,5 +784,83 @@ describe("buildDiscussionComment", () => {
     expect(parsed?.type).toBe("welcome");
     expect(parsed?.issueNumber).toBe(99);
     expect(parsed?.version).toBe(1);
+  });
+});
+
+describe("createStandupMetadata", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-02-07T00:05:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("should create metadata with correct structure", () => {
+    const result = createStandupMetadata(42, "2026-02-06", "hivemoot/colony");
+
+    expect(result).toEqual({
+      version: 1,
+      type: "standup",
+      day: 42,
+      date: "2026-02-06",
+      repo: "hivemoot/colony",
+      createdAt: "2026-02-07T00:05:00.000Z",
+      issueNumber: 0,
+    });
+  });
+
+  it("should set issueNumber to 0", () => {
+    const result = createStandupMetadata(1, "2026-01-01", "org/repo");
+    expect(result.issueNumber).toBe(0);
+  });
+});
+
+describe("parseMetadata with standup type", () => {
+  it("should parse standup metadata", () => {
+    const body = '<!-- hivemoot-metadata: {"version":1,"type":"standup","day":42,"date":"2026-02-06","repo":"hivemoot/colony","issueNumber":0,"createdAt":"2026-02-07T00:05:00Z"} -->';
+
+    const result = parseMetadata(body);
+
+    expect(result?.type).toBe("standup");
+    expect((result as StandupMetadata).day).toBe(42);
+    expect((result as StandupMetadata).date).toBe("2026-02-06");
+    expect((result as StandupMetadata).repo).toBe("hivemoot/colony");
+  });
+
+  it("should reject standup metadata missing day field", () => {
+    const body = '<!-- hivemoot-metadata: {"version":1,"type":"standup","date":"2026-02-06","repo":"hivemoot/colony","issueNumber":0,"createdAt":"2026-02-07T00:05:00Z"} -->';
+
+    const result = parseMetadata(body);
+
+    expect(result).toBeNull();
+  });
+
+  it("should reject standup metadata missing date field", () => {
+    const body = '<!-- hivemoot-metadata: {"version":1,"type":"standup","day":42,"repo":"hivemoot/colony","issueNumber":0,"createdAt":"2026-02-07T00:05:00Z"} -->';
+
+    const result = parseMetadata(body);
+
+    expect(result).toBeNull();
+  });
+
+  it("should reject standup metadata missing repo field", () => {
+    const body = '<!-- hivemoot-metadata: {"version":1,"type":"standup","day":42,"date":"2026-02-06","issueNumber":0,"createdAt":"2026-02-07T00:05:00Z"} -->';
+
+    const result = parseMetadata(body);
+
+    expect(result).toBeNull();
+  });
+
+  it("should round-trip standup metadata through generateMetadataTag", () => {
+    const metadata = createStandupMetadata(42, "2026-02-06", "hivemoot/colony");
+    const tag = generateMetadataTag(metadata);
+    const parsed = parseMetadata(tag);
+
+    expect(parsed?.type).toBe("standup");
+    expect((parsed as StandupMetadata).day).toBe(42);
+    expect((parsed as StandupMetadata).date).toBe("2026-02-06");
+    expect((parsed as StandupMetadata).repo).toBe("hivemoot/colony");
   });
 });

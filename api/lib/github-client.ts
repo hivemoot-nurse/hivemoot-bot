@@ -56,7 +56,7 @@ export interface IssueData {
   title: string;
   body?: string | null;
   user?: { login: string } | null;
-  reactions?: { "+1": number; "-1": number; confused: number };
+  reactions?: { "+1": number; "-1": number; confused: number; eyes?: number };
 }
 
 export interface GitHubClient {
@@ -300,12 +300,13 @@ export class IssueOperations {
 
     // Defensive null checking - API may return malformed response
     const reactions = issue.reactions as
-      | { "+1"?: number; "-1"?: number; confused?: number }
+      | { "+1"?: number; "-1"?: number; confused?: number; eyes?: number }
       | undefined;
     return {
       thumbsUp: toReactionCount(reactions?.["+1"]),
       thumbsDown: toReactionCount(reactions?.["-1"]),
       confused: toReactionCount(reactions?.confused),
+      eyes: toReactionCount(reactions?.eyes),
     };
   }
 
@@ -498,7 +499,7 @@ export class IssueOperations {
    * in one API call.
    */
   async getValidatedVoteCounts(ref: IssueRef, commentId: number): Promise<ValidatedVoteResult> {
-    const VOTING_REACTIONS = new Set(["+1", "-1", "confused"]);
+    const VOTING_REACTIONS = new Set(["+1", "-1", "confused", "eyes"]);
 
     const iterator = this.client.paginate.iterator<Reaction>(
       this.client.rest.reactions.listForIssueComment,
@@ -536,6 +537,7 @@ export class IssueOperations {
     let thumbsUp = 0;
     let thumbsDown = 0;
     let confused = 0;
+    let eyes = 0;
     const voters: string[] = [];
     const participants: string[] = [];
 
@@ -548,6 +550,7 @@ export class IssueOperations {
         if (reaction === "+1") thumbsUp++;
         else if (reaction === "-1") thumbsDown++;
         else if (reaction === "confused") confused++;
+        else if (reaction === "eyes") eyes++;
         voters.push(user);
       }
       // Users with multiple reaction types are discarded from tally and quorum
@@ -560,7 +563,7 @@ export class IssueOperations {
     }
 
     return {
-      votes: { thumbsUp, thumbsDown, confused },
+      votes: { thumbsUp, thumbsDown, confused, eyes },
       voters,
       participants,
     };

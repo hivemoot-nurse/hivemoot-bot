@@ -49,6 +49,13 @@ export interface MergeReadyConfig {
   minApprovals: number;
 }
 
+// ── Standup Config ──────────────────────────────────────────────────────
+
+export interface StandupConfig {
+  enabled: boolean;
+  category: string;
+}
+
 export interface VotingExit {
   afterMs: number;
   requires: ExitRequires;
@@ -89,6 +96,10 @@ export interface RepoConfigFile {
       mergeReady?: unknown;
     };
   };
+  standup?: {
+    enabled?: boolean;
+    category?: string;
+  };
 }
 
 /**
@@ -118,6 +129,7 @@ export interface EffectiveConfig {
       mergeReady: MergeReadyConfig | null;
     };
   };
+  standup: StandupConfig;
 }
 
 /**
@@ -790,6 +802,57 @@ function parseMergeReadyConfig(
 }
 
 /**
+ * Parse and validate standup config.
+ * Opt-in feature — disabled by default.
+ * When enabled, `category` is required — there is no default.
+ */
+function parseStandupConfig(
+  value: unknown,
+  repoFullName: string
+): StandupConfig {
+  const disabled: StandupConfig = { enabled: false, category: "" };
+
+  if (value === undefined || value === null) {
+    return disabled;
+  }
+
+  if (typeof value !== "object" || Array.isArray(value)) {
+    logger.warn(
+      `[${repoFullName}] Invalid standup config: expected object. Disabling standup.`
+    );
+    return disabled;
+  }
+
+  const obj = value as { enabled?: unknown; category?: unknown };
+
+  let enabled = false;
+  if (obj.enabled !== undefined && obj.enabled !== null) {
+    if (typeof obj.enabled === "boolean") {
+      enabled = obj.enabled;
+    } else {
+      logger.warn(
+        `[${repoFullName}] Invalid standup.enabled: expected boolean. Disabling standup.`
+      );
+    }
+  }
+
+  if (!enabled) {
+    return disabled;
+  }
+
+  // category is required when enabled
+  if (typeof obj.category !== "string" || obj.category.trim().length === 0) {
+    logger.warn(
+      `[${repoFullName}] standup.enabled is true but standup.category is missing. ` +
+      `Set standup.category to the Discussion category name (e.g., "Colony Reports"). Disabling standup.`
+    );
+    return disabled;
+  }
+
+  return { enabled: true, category: obj.category.trim() };
+}
+
+/**
  * Parse and validate a RepoConfigFile object.
  * Returns EffectiveConfig with all values validated and clamped.
  *
@@ -843,6 +906,7 @@ function parseRepoConfig(raw: unknown, repoFullName: string): EffectiveConfig {
         mergeReady,
       },
     },
+    standup: parseStandupConfig(config?.standup, repoFullName),
   };
 }
 
@@ -880,6 +944,7 @@ export function getDefaultConfig(): EffectiveConfig {
         mergeReady: null,
       },
     },
+    standup: { enabled: false, category: "" },
   };
 }
 

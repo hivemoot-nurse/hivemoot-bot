@@ -15,6 +15,7 @@ export interface Issue {
     "+1": number;
     "-1": number;
     confused: number;
+    eyes?: number;
   };
 }
 
@@ -45,6 +46,7 @@ export interface VoteCounts {
   thumbsUp: number;
   thumbsDown: number;
   confused: number;
+  eyes: number;
 }
 
 /**
@@ -73,6 +75,7 @@ export type VotingOutcome =
   | "rejected"
   | "inconclusive"
   | "needs-more-discussion"
+  | "needs-human-input"
   | "skipped";
 
 /**

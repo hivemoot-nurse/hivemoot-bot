@@ -98,8 +98,8 @@ export const SIGNATURE = "\n\n---\nbuzz buzz 🐝 Hivemoot Queen";
 // ───────────────────────────────────────────────────────────────────────────────
 
 /** Format vote results for display */
-const formatVotes = (votes: { thumbsUp: number; thumbsDown: number; confused: number }) =>
-  `**Results:** 👍 ${votes.thumbsUp} | 👎 ${votes.thumbsDown} | 😕 ${votes.confused}`;
+const formatVotes = (votes: { thumbsUp: number; thumbsDown: number; confused: number; eyes: number }) =>
+  `**Results:** 👍 ${votes.thumbsUp} | 👎 ${votes.thumbsDown} | 😕 ${votes.confused} | 👀 ${votes.eyes}`;
 
 const formatVotingRequirements = (opts: {
   minVoters: number;
@@ -153,11 +153,12 @@ Time for hivemoot to decide.
 - 👍 **Ready** — Approve for implementation
 - 👎 **Not Ready** — Close this proposal
 - 😕 **Needs Discussion** — Back to discussion
+- 👀 **Needs Human Input** — Escalate for human review
 
 Voting closes in ~24 hours.${SIGNATURE}`,
 
   // Posted when voting ends with a phase:ready-to-implement outcome
-  votingEndReadyToImplement: (votes: { thumbsUp: number; thumbsDown: number; confused: number }) => `# 🐝 Ready to Implement ✅
+  votingEndReadyToImplement: (votes: { thumbsUp: number; thumbsDown: number; confused: number; eyes: number }) => `# 🐝 Ready to Implement ✅
 
 ${formatVotes(votes)}
 
@@ -169,21 +170,30 @@ Next steps:
 - Implementation slots are limited; additional PRs may be deferred to a later round.${SIGNATURE}`,
 
   // Posted when voting ends with rejection
-  votingEndRejected: (votes: { thumbsUp: number; thumbsDown: number; confused: number }) => `# 🐝 Rejected ❌
+  votingEndRejected: (votes: { thumbsUp: number; thumbsDown: number; confused: number; eyes: number }) => `# 🐝 Rejected ❌
 
 ${formatVotes(votes)}
 
 Hivemoot has decided. This proposal is closed.${SIGNATURE}`,
 
   // Posted when voting ends with needs-more-discussion (majority abstain)
-  votingEndNeedsMoreDiscussion: (votes: { thumbsUp: number; thumbsDown: number; confused: number }) => `# 🐝 Needs More Discussion 💬
+  votingEndNeedsMoreDiscussion: (votes: { thumbsUp: number; thumbsDown: number; confused: number; eyes: number }) => `# 🐝 Needs More Discussion 💬
 
 ${formatVotes(votes)}
 
 Back to the drawing board. Returning to discussion phase.${SIGNATURE}`,
 
+  // Posted when voting ends with needs-human-input (eyes majority)
+  votingEndNeedsHumanInput: (votes: { thumbsUp: number; thumbsDown: number; confused: number; eyes: number }) => `# 🐝 Needs Human Input 👀
+
+${formatVotes(votes)}
+
+The hive has spoken — this issue needs a human to weigh in. The issue remains open and unlocked for human response.
+
+Remove the \`needs:human-input\` label when you've addressed the concern.${SIGNATURE}`,
+
   // Posted when voting ends with tie/no votes (first round - extended voting begins)
-  votingEndInconclusive: (votes: { thumbsUp: number; thumbsDown: number; confused: number }) => `# 🐝 Extended Voting ⚖️
+  votingEndInconclusive: (votes: { thumbsUp: number; thumbsDown: number; confused: number; eyes: number }) => `# 🐝 Extended Voting ⚖️
 
 ${formatVotes(votes)}
 
@@ -191,7 +201,7 @@ The initial vote was tied. Voting continues — react to the voting comment abov
 
   // Posted when voting requirements (quorum/required voters) are not met
   votingEndRequirementsNotMet: (params: {
-    votes: { thumbsUp: number; thumbsDown: number; confused: number };
+    votes: { thumbsUp: number; thumbsDown: number; confused: number; eyes: number };
     minVoters: number;
     validVoters: number;
     missingRequired: string[];
@@ -217,25 +227,35 @@ ${params.final
 
   // Posted when extended voting resolves with a clear winner
   votingEndInconclusiveResolved: (
-    votes: { thumbsUp: number; thumbsDown: number; confused: number },
-    outcome: "phase:ready-to-implement" | "rejected"
+    votes: { thumbsUp: number; thumbsDown: number; confused: number; eyes: number },
+    outcome: "phase:ready-to-implement" | "rejected" | "needs-human-input"
   ) => {
-    const status = outcome === "phase:ready-to-implement"
-      ? "Ready to Implement"
-      : "Rejected";
-    const emoji = outcome === "phase:ready-to-implement" ? "✅" : "❌";
-    const explanation = outcome === "phase:ready-to-implement"
-      ? "Patience paid off. Ready for implementation."
-      : "Hivemoot has decided. This proposal is closed.";
-    return `# 🐝 ${status} ${emoji}
+    const config = {
+      "phase:ready-to-implement": {
+        status: "Ready to Implement",
+        emoji: "✅",
+        explanation: "Patience paid off. Ready for implementation.",
+      },
+      rejected: {
+        status: "Rejected",
+        emoji: "❌",
+        explanation: "Hivemoot has decided. This proposal is closed.",
+      },
+      "needs-human-input": {
+        status: "Needs Human Input",
+        emoji: "👀",
+        explanation: "The hive has spoken — this issue needs a human to weigh in. Remove the `needs:human-input` label when you've addressed the concern.",
+      },
+    }[outcome];
+    return `# 🐝 ${config.status} ${config.emoji}
 
 ${formatVotes(votes)}
 
-${explanation}${SIGNATURE}`;
+${config.explanation}${SIGNATURE}`;
   },
 
   // Posted when extended voting still results in a tie (final closure)
-  votingEndInconclusiveFinal: (votes: { thumbsUp: number; thumbsDown: number; confused: number }) => `# 🐝 Inconclusive (Final) 🔒
+  votingEndInconclusiveFinal: (votes: { thumbsUp: number; thumbsDown: number; confused: number; eyes: number }) => `# 🐝 Inconclusive (Final) 🔒
 
 ${formatVotes(votes)}
 
@@ -279,6 +299,7 @@ export const LABELS = {
   STALE: "stale",
   IMPLEMENTED: "implemented",
   BLOCKED_HUMAN_HELP: "blocked:human-help-needed",
+  NEEDS_HUMAN_INPUT: "needs:human-input",
   MERGE_READY: "merge-ready",
 } as const;
 

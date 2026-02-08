@@ -531,7 +531,7 @@ describe("close-discussions script", () => {
       ],
       findVotingCommentId: vi.fn().mockResolvedValue(123),
       getValidatedVoteCounts: vi.fn().mockResolvedValue({
-        votes: { thumbsUp: 2, thumbsDown: 0, confused: 0 },
+        votes: { thumbsUp: 2, thumbsDown: 0, confused: 0, eyes: 0 },
         voters: ["agent-a", "agent-b"],
         participants: ["agent-a", "agent-b"],
       } as ValidatedVoteResult),

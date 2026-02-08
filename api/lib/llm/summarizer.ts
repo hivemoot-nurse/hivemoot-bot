@@ -210,6 +210,7 @@ export function formatVotingMessage(
   lines.push("- 👍 **Ready** — Approve for implementation");
   lines.push("- 👎 **Not Ready** — Close this proposal");
   lines.push("- 😕 **Needs Discussion** — Back to discussion");
+  lines.push("- 👀 **Needs Human Input** — Escalate for human review");
   lines.push("");
 
   // Compressed metadata

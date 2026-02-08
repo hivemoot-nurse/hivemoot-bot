@@ -16,7 +16,7 @@
  * All possible bot comment types.
  * Single source of truth: the array drives both runtime validation and the type.
  */
-const COMMENT_TYPES = ["voting", "leaderboard", "welcome", "status", "error", "notification"] as const;
+const COMMENT_TYPES = ["voting", "leaderboard", "welcome", "status", "error", "notification", "standup"] as const;
 export type CommentType = (typeof COMMENT_TYPES)[number];
 
 /**
@@ -76,6 +76,17 @@ export interface NotificationMetadata extends BaseMetadata {
 }
 
 /**
+ * Standup comment metadata - daily Colony Journal entries.
+ * issueNumber is set to 0 because standup comments live on a Discussion, not an Issue.
+ */
+export interface StandupMetadata extends BaseMetadata {
+  type: "standup";
+  day: number;
+  date: string;
+  repo: string;
+}
+
+/**
  * Discriminated union of all comment metadata types.
  */
 export type CommentMetadata =
@@ -84,7 +95,8 @@ export type CommentMetadata =
   | WelcomeMetadata
   | StatusMetadata
   | HumanHelpMetadata
-  | NotificationMetadata;
+  | NotificationMetadata
+  | StandupMetadata;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Signatures for Comment Detection
@@ -213,6 +225,21 @@ export function createNotificationMetadata(
   };
 }
 
+/**
+ * Create standup comment metadata for Colony Journal entries.
+ */
+export function createStandupMetadata(day: number, date: string, repo: string): StandupMetadata {
+  return {
+    version: 1,
+    type: "standup",
+    day,
+    date,
+    repo,
+    createdAt: new Date().toISOString(),
+    issueNumber: 0,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Comment Builders
 // ─────────────────────────────────────────────────────────────────────────────
@@ -314,6 +341,13 @@ export function parseMetadata(body: string | undefined | null): CommentMetadata 
     // Validate notification-specific fields
     if (obj.type === "notification") {
       if (typeof obj.notificationType !== "string" || typeof obj.issueNumber !== "number") {
+        return null;
+      }
+    }
+
+    // Validate standup-specific fields
+    if (obj.type === "standup") {
+      if (typeof obj.day !== "number" || typeof obj.date !== "string" || typeof obj.repo !== "string") {
         return null;
       }
     }

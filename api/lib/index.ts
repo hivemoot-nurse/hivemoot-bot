@@ -77,4 +77,5 @@ export type {
   ExitRequires,
   IntakeMethod,
   MergeReadyConfig,
+  StandupConfig,
 } from "./repo-config.js";
