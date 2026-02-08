@@ -2,5 +2,9 @@
   "version": 2,
   "framework": null,
   "buildCommand": null,
-  "outputDirectory": "public"
+  "outputDirectory": "public",
+  "git": {
+    "deploymentEnabled": false,
+    "ignoreCommand": "exit 0"
+  }
 }
