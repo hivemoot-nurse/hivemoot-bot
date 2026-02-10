@@ -615,7 +615,7 @@ async function processRepository(
       accessIssues.push({ repo: repo.full_name, issueNumber: ref.issueNumber, status, reason });
     };
 
-    const { voting } = repoConfig.governance.proposals;
+    const { voting, extendedVoting } = repoConfig.governance.proposals;
     const { trustedReviewers, intake, maxPRsPerIssue } = repoConfig.governance.pr;
     const prIntakeConfig = { maxPRsPerIssue, trustedReviewers, intake };
 
@@ -628,27 +628,45 @@ async function processRepository(
         requires: deadlineExit.requires,
       },
     };
+    const extendedDeadlineExit = extendedVoting.exits[extendedVoting.exits.length - 1];
+    const extendedVotingEndOptions: import("../api/lib/governance.js").EndVotingOptions = {
+      votingConfig: {
+        minVoters: extendedDeadlineExit.minVoters,
+        requiredVoters: extendedDeadlineExit.requiredVoters,
+        requires: extendedDeadlineExit.requires,
+      },
+    };
 
     // Voting/inconclusive phases share a transition pattern: end voting, track
     // outcome, and notify pending PRs if the proposal passed.
     // endVoting now fetches validated votes internally (with multi-reaction discard),
     // so no external reactor fetching is needed here.
     const votingTransition = (
-      endFn: (ref: IssueRef, options?: import("../api/lib/governance.js").EndVotingOptions) => Promise<VotingOutcome>
+      endFn: (ref: IssueRef, options?: import("../api/lib/governance.js").EndVotingOptions) => Promise<VotingOutcome>,
+      endOptions: import("../api/lib/governance.js").EndVotingOptions,
     ) => async (_gov: GovernanceService, ref: IssueRef): Promise<void> => {
-      const outcome = await endFn(ref, votingEndOptions);
+      const outcome = await endFn(ref, endOptions);
       trackOutcome(outcome, ref.issueNumber);
       if (outcome === "phase:ready-to-implement") {
         await notifyPendingPRs(octokit, appId, owner, repoName, ref.issueNumber, prIntakeConfig);
       }
     };
 
-    // Early decision check dependencies (shared between voting and inconclusive phases)
-    const earlyDecisionDeps: EarlyDecisionDeps = {
+    // Early decision check dependencies for the voting phase
+    const votingEarlyDecisionDeps: EarlyDecisionDeps = {
       earlyExits: voting.exits.slice(0, -1), // all except deadline
       findVotingCommentId: (ref) => issues.findVotingCommentId(ref),
       getValidatedVoteCounts: (ref, commentId) => issues.getValidatedVoteCounts(ref, commentId),
       votingEndOptions,
+      trackOutcome,
+      notifyPRs: (issueNumber) => notifyPendingPRs(octokit, appId, owner, repoName, issueNumber, prIntakeConfig),
+    };
+    // Early decision check dependencies for the extended-voting phase
+    const extendedEarlyDecisionDeps: EarlyDecisionDeps = {
+      earlyExits: extendedVoting.exits.slice(0, -1), // all except deadline
+      findVotingCommentId: (ref) => issues.findVotingCommentId(ref),
+      getValidatedVoteCounts: (ref, commentId) => issues.getValidatedVoteCounts(ref, commentId),
+      votingEndOptions: extendedVotingEndOptions,
       trackOutcome,
       notifyPRs: (issueNumber) => notifyPendingPRs(octokit, appId, owner, repoName, issueNumber, prIntakeConfig),
     };
@@ -673,15 +691,15 @@ async function processRepository(
         label: LABELS.VOTING,
         durationMs: voting.durationMs,
         phaseName: "voting",
-        transition: votingTransition((ref, opts) => governance.endVoting(ref, opts)),
-        earlyCheck: makeEarlyDecisionCheck((ref, opts) => governance.endVoting(ref, opts), earlyDecisionDeps),
+        transition: votingTransition((ref, opts) => governance.endVoting(ref, opts), votingEndOptions),
+        earlyCheck: makeEarlyDecisionCheck((ref, opts) => governance.endVoting(ref, opts), votingEarlyDecisionDeps),
       },
       {
         label: LABELS.EXTENDED_VOTING,
-        durationMs: voting.durationMs,
+        durationMs: extendedVoting.durationMs,
         phaseName: "extended voting",
-        transition: votingTransition((ref, opts) => governance.resolveInconclusive(ref, opts)),
-        earlyCheck: makeEarlyDecisionCheck((ref, opts) => governance.resolveInconclusive(ref, opts), earlyDecisionDeps),
+        transition: votingTransition((ref, opts) => governance.resolveInconclusive(ref, opts), extendedVotingEndOptions),
+        earlyCheck: makeEarlyDecisionCheck((ref, opts) => governance.resolveInconclusive(ref, opts), extendedEarlyDecisionDeps),
       },
     ];
 

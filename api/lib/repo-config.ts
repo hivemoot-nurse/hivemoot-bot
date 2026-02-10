@@ -87,6 +87,9 @@ export interface RepoConfigFile {
       voting?: {
         exits?: unknown[];
       };
+      extendedVoting?: {
+        exits?: unknown[];
+      };
     };
     pr?: {
       staleDays?: number;
@@ -116,6 +119,11 @@ export interface EffectiveConfig {
         durationMs: number;
       };
       voting: {
+        exits: VotingExit[];
+        /** Derived from last exit's afterMs (the deadline) */
+        durationMs: number;
+      };
+      extendedVoting: {
         exits: VotingExit[];
         /** Derived from last exit's afterMs (the deadline) */
         durationMs: number;
@@ -874,6 +882,9 @@ function parseRepoConfig(raw: unknown, repoFullName: string): EffectiveConfig {
   // Voting exits (default applied if missing)
   const exitsRaw = config?.governance?.proposals?.voting?.exits;
   const exits = parseExits(exitsRaw, repoFullName);
+  // Extended voting exits (fallback to voting.exits when missing for backward compatibility)
+  const extendedExitsRaw = config?.governance?.proposals?.extendedVoting?.exits;
+  const extendedExits = parseExits(extendedExitsRaw ?? exitsRaw, repoFullName);
 
   return {
     version: typeof config?.version === "number" ? config.version : 1,
@@ -886,6 +897,10 @@ function parseRepoConfig(raw: unknown, repoFullName: string): EffectiveConfig {
         voting: {
           exits,
           durationMs: exits[exits.length - 1].afterMs,
+        },
+        extendedVoting: {
+          exits: extendedExits,
+          durationMs: extendedExits[extendedExits.length - 1].afterMs,
         },
       },
       pr: {
@@ -914,6 +929,13 @@ function parseRepoConfig(raw: unknown, repoFullName: string): EffectiveConfig {
  * Get the default configuration (env-derived, clamped to CONFIG_BOUNDS).
  */
 export function getDefaultConfig(): EffectiveConfig {
+  const createDefaultVotingExit = (): VotingExit => ({
+    afterMs: VOTING_DURATION_MS,
+    requires: "majority" as const,
+    minVoters: CONFIG_BOUNDS.voting.minVoters.default,
+    requiredVoters: { minCount: 0, voters: [] },
+  });
+
   return {
     version: 1,
     governance: {
@@ -927,12 +949,11 @@ export function getDefaultConfig(): EffectiveConfig {
           durationMs: DISCUSSION_DURATION_MS,
         },
         voting: {
-          exits: [{
-            afterMs: VOTING_DURATION_MS,
-            requires: "majority" as const,
-            minVoters: CONFIG_BOUNDS.voting.minVoters.default,
-            requiredVoters: { minCount: 0, voters: [] },
-          }],
+          exits: [createDefaultVotingExit()],
+          durationMs: VOTING_DURATION_MS,
+        },
+        extendedVoting: {
+          exits: [createDefaultVotingExit()],
           durationMs: VOTING_DURATION_MS,
         },
       },

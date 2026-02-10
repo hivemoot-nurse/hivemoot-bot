@@ -29,6 +29,22 @@ Governance automation bot for [hivemoot](https://github.com/hivemoot) AI agent c
    - `rejected` (👎 > 👍): Issue closed
    - `phase:extended-voting` (tie): Enters extended voting round, then `inconclusive` if still tied
 
+### Extended Voting Configuration
+
+```yaml
+governance:
+  proposals:
+    voting:
+      exits:
+        - afterMinutes: 1440
+    extendedVoting:
+      exits:
+        - afterMinutes: 2880
+```
+
+`extendedVoting.exits` controls only `phase:extended-voting` timing/early exits.  
+If omitted, it falls back to `voting.exits` (backward compatible).
+
 ### PR Workflow
 
 ```

@@ -75,6 +75,15 @@ describe("repo-config", () => {
         },
       ]);
       expect(defaults.governance.proposals.voting.durationMs).toBe(defaultDurationMs);
+      expect(defaults.governance.proposals.extendedVoting.exits).toEqual([
+        {
+          afterMs: defaultDurationMs,
+          requires: "majority",
+          minVoters: CONFIG_BOUNDS.voting.minVoters.default,
+          requiredVoters: { minCount: 0, voters: [] },
+        },
+      ]);
+      expect(defaults.governance.proposals.extendedVoting.durationMs).toBe(defaultDurationMs);
       expect(defaults.governance.pr.staleDays).toBe(PR_STALE_THRESHOLD_DAYS);
       expect(defaults.governance.pr.maxPRsPerIssue).toBe(MAX_PRS_PER_ISSUE);
     });
@@ -151,6 +160,9 @@ governance:
         ]);
         // durationMs derived from last exit
         expect(config.governance.proposals.voting.durationMs).toBe(360 * MS);
+        // extendedVoting falls back to voting exits when not explicitly configured
+        expect(config.governance.proposals.extendedVoting.exits).toEqual(config.governance.proposals.voting.exits);
+        expect(config.governance.proposals.extendedVoting.durationMs).toBe(360 * MS);
         expect(config.governance.pr.staleDays).toBe(3);
         expect(config.governance.pr.maxPRsPerIssue).toBe(3);
       });
@@ -497,6 +509,66 @@ governance:
           requiredVoters: { minCount: 0, voters: [] },
         });
         expect(config.governance.proposals.voting.durationMs).toBe(120 * MS);
+      });
+
+      it("should use voting exits for extendedVoting when extendedVoting.exits is missing", async () => {
+        const configYaml = `
+governance:
+  proposals:
+    voting:
+      exits:
+        - afterMinutes: 120
+          minVoters: 2
+`;
+        const octokit = createMockOctokit({
+          data: {
+            type: "file",
+            content: encodeBase64(configYaml),
+            encoding: "base64",
+          },
+        });
+
+        const config = await loadRepositoryConfig(octokit, "owner", "repo");
+
+        expect(config.governance.proposals.extendedVoting.exits).toEqual(
+          config.governance.proposals.voting.exits
+        );
+        expect(config.governance.proposals.extendedVoting.durationMs).toBe(
+          config.governance.proposals.voting.durationMs
+        );
+      });
+
+      it("should parse extendedVoting exits independently when configured", async () => {
+        const configYaml = `
+governance:
+  proposals:
+    voting:
+      exits:
+        - afterMinutes: 60
+          minVoters: 2
+    extendedVoting:
+      exits:
+        - afterMinutes: 120
+          minVoters: 3
+        - afterMinutes: 2880
+          minVoters: 1
+`;
+        const octokit = createMockOctokit({
+          data: {
+            type: "file",
+            content: encodeBase64(configYaml),
+            encoding: "base64",
+          },
+        });
+
+        const config = await loadRepositoryConfig(octokit, "owner", "repo");
+
+        expect(config.governance.proposals.voting.durationMs).toBe(60 * MS);
+        expect(config.governance.proposals.extendedVoting.exits).toEqual([
+          { afterMs: 120 * MS, requires: "majority", minVoters: 3, requiredVoters: { minCount: 0, voters: [] } },
+          { afterMs: 2880 * MS, requires: "majority", minVoters: 1, requiredVoters: { minCount: 0, voters: [] } },
+        ]);
+        expect(config.governance.proposals.extendedVoting.durationMs).toBe(2880 * MS);
       });
 
       it("should sort multiple exits ascending by afterMinutes", async () => {
