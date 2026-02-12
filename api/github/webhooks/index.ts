@@ -77,8 +77,13 @@ function app(probotApp: Probot): void {
       const appId = getAppId();
       const issues = createIssueOperations(context.octokit, { appId });
       const governance = createGovernanceService(issues);
+      const repoConfig = await loadRepositoryConfig(context.octokit, owner, repo);
+      const issueWelcomeMessage =
+        repoConfig.governance.proposals.decision.method === "manual"
+          ? MESSAGES.ISSUE_WELCOME_MANUAL
+          : MESSAGES.ISSUE_WELCOME_VOTING;
 
-      await governance.startDiscussion({ owner, repo, issueNumber: number });
+      await governance.startDiscussion({ owner, repo, issueNumber: number }, issueWelcomeMessage);
     } catch (error) {
       context.log.error({ err: error, issue: number, repo: fullName }, "Failed to process issue");
       throw error;

@@ -65,7 +65,15 @@ describe("GovernanceService", () => {
       // Should contain welcome metadata tag and the welcome message
       expect(commentBody).toContain("hivemoot-metadata:");
       expect(commentBody).toContain('"type":"welcome"');
-      expect(commentBody).toContain(MESSAGES.ISSUE_WELCOME);
+      expect(commentBody).toContain(MESSAGES.ISSUE_WELCOME_VOTING);
+    });
+
+    it("should use provided welcome message override", async () => {
+      await governance.startDiscussion(testRef, MESSAGES.ISSUE_WELCOME_MANUAL);
+
+      const commentBody = vi.mocked(mockIssues.comment).mock.calls[0][1];
+      expect(commentBody).toContain(MESSAGES.ISSUE_WELCOME_MANUAL);
+      expect(commentBody).not.toContain("Ready to vote?");
     });
 
     it("should run label and comment in parallel", async () => {

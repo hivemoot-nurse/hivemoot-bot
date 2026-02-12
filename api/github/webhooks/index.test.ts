@@ -201,9 +201,16 @@ describe("Queen Bot", () => {
 
   describe("Message Templates", () => {
     it("should include Queen signature in all messages", () => {
+      expect(MESSAGES.ISSUE_WELCOME_VOTING).toContain("Queen");
       expect(MESSAGES.ISSUE_WELCOME).toContain("Queen");
+      expect(MESSAGES.ISSUE_WELCOME_MANUAL).toContain("Queen");
       expect(MESSAGES.PR_NO_LINKED_ISSUE).toContain("Queen");
       expect(MESSAGES.VOTING_START).toContain("Queen");
+    });
+
+    it("should keep distinct issue welcome text for vote and manual modes", () => {
+      expect(MESSAGES.ISSUE_WELCOME_VOTING).toContain("Ready to vote?");
+      expect(MESSAGES.ISSUE_WELCOME_MANUAL).toContain("Nothing moves forward automatically here.");
     });
 
     it("should include voting instructions in VOTING_START", () => {

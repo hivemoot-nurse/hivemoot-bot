@@ -128,13 +128,28 @@ const formatVotingRequirements = (opts: {
   return lines.join("\n");
 };
 
-export const MESSAGES = {
-  // Posted when a new issue is opened
-  ISSUE_WELCOME: `# 🐝 Discussion Phase
+const ISSUE_WELCOME_VOTING = `# 🐝 Discussion Phase
 
 Welcome to hivemoot! Share your analysis, proposals, or concerns.
 
-**Ready to vote?** React 👍 on the issue above to signal readiness. Voting opens in ~24 hours, or earlier if enough participants are ready.${SIGNATURE}`,
+**Ready to vote?** React 👍 on the issue above to signal readiness. Voting opens in ~24 hours, or earlier if enough participants are ready.${SIGNATURE}`;
+
+const ISSUE_WELCOME_MANUAL = `# 🐝 Discussion Phase
+
+Welcome to hivemoot! Share your analysis, proposals, or concerns.
+
+React 👍 on the issue to show support (or 👎 if it needs more discussion).
+
+Nothing moves forward automatically here. Discussion and reactions are encouraged; a maintainer will take the next step when there's enough support.${SIGNATURE}`;
+
+export const MESSAGES = {
+  // Posted when a new issue is opened and voting automation is enabled.
+  ISSUE_WELCOME_VOTING,
+  // Backward-compat alias; prefer ISSUE_WELCOME_VOTING.
+  ISSUE_WELCOME: ISSUE_WELCOME_VOTING,
+
+  // Posted when a new issue is opened and decision method is manual.
+  ISSUE_WELCOME_MANUAL,
 
   // Posted when a new PR is opened with no linked issues
   PR_NO_LINKED_ISSUE: `# 🐝 No Linked Issue

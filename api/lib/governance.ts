@@ -129,9 +129,10 @@ export class GovernanceService {
    * Start the discussion phase for a new issue.
    *
    * Wraps the welcome message with metadata to enable future comment discovery.
+   * Defaults to the voting-mode welcome text unless a caller provides an override.
    */
-  async startDiscussion(ref: IssueRef): Promise<void> {
-    const commentBody = buildDiscussionComment(MESSAGES.ISSUE_WELCOME, ref.issueNumber);
+  async startDiscussion(ref: IssueRef, welcomeMessage = MESSAGES.ISSUE_WELCOME_VOTING): Promise<void> {
+    const commentBody = buildDiscussionComment(welcomeMessage, ref.issueNumber);
     await Promise.all([
       this.issues.addLabels(ref, [LABELS.DISCUSSION]),
       this.issues.comment(ref, commentBody),
