@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { GovernanceService } from "../../lib/governance.js";
 import { createIssueOperations } from "../../lib/github-client.js";
-import { LABELS, MESSAGES } from "../../config.js";
+import { LABELS, MESSAGES, REQUIRED_REPOSITORY_LABELS } from "../../config.js";
 import type { IssueRef } from "../../lib/types.js";
 import type { IncomingMessage, ServerResponse } from "http";
+import { app as registerWebhookApp } from "./index.js";
 
 // Mock probot to prevent actual initialization
 vi.mock("probot", () => ({
@@ -28,7 +29,208 @@ vi.mock("../../lib/env-validation.js", () => ({
 
 const TEST_APP_ID = 12345;
 
+type WebhookHandler = (context: unknown) => Promise<void> | void;
+
+function buildIterator<T>(pages: T[][]): AsyncIterable<{ data: T[] }> {
+  return {
+    async *[Symbol.asyncIterator]() {
+      for (const page of pages) {
+        yield { data: page };
+      }
+    },
+  };
+}
+
+function createWebhookHarness() {
+  const handlers = new Map<string, WebhookHandler>();
+  const probotApp = {
+    log: {
+      info: vi.fn(),
+      error: vi.fn(),
+    },
+    on: vi.fn((event: string | string[], handler: WebhookHandler) => {
+      if (Array.isArray(event)) {
+        for (const entry of event) {
+          handlers.set(entry, handler);
+        }
+        return;
+      }
+      handlers.set(event, handler);
+    }),
+  };
+
+  registerWebhookApp(probotApp as any);
+  return { handlers };
+}
+
+function createInstallationOctokit(options?: {
+  existingLabels?: Array<{ name: string }>;
+  fallbackRepositories?: Array<{ name: string; full_name: string; owner?: { login?: string } | null }>;
+}) {
+  const existingLabels = options?.existingLabels ?? [];
+  const fallbackRepositories = options?.fallbackRepositories ?? [];
+
+  const rest = {
+    issues: {
+      listLabelsForRepo: vi.fn(),
+      createLabel: vi.fn().mockResolvedValue({}),
+    },
+    apps: {
+      listReposAccessibleToInstallation: vi.fn().mockResolvedValue({
+        data: {
+          repositories: fallbackRepositories,
+        },
+      }),
+    },
+  };
+
+  return {
+    rest,
+    paginate: {
+      iterator: vi.fn().mockImplementation((method: unknown) => {
+        if (method === rest.issues.listLabelsForRepo) {
+          return buildIterator([existingLabels]);
+        }
+        return buildIterator([[]]);
+      }),
+    },
+  };
+}
+
 describe("Queen Bot", () => {
+  describe("Installation label bootstrap handlers", () => {
+    it("should bootstrap labels from installation.created payload repositories", async () => {
+      const { handlers } = createWebhookHarness();
+      const handler = handlers.get("installation.created");
+      expect(handler).toBeDefined();
+
+      const octokit = createInstallationOctokit();
+      await handler!({
+        octokit,
+        log: {
+          info: vi.fn(),
+          error: vi.fn(),
+        },
+        payload: {
+          repositories: [
+            {
+              owner: { login: "hivemoot" },
+              name: "repo-a",
+              full_name: "hivemoot/repo-a",
+            },
+          ],
+        },
+      });
+
+      expect(octokit.rest.apps.listReposAccessibleToInstallation).not.toHaveBeenCalled();
+      expect(octokit.rest.issues.createLabel).toHaveBeenCalledTimes(REQUIRED_REPOSITORY_LABELS.length);
+      expect(octokit.rest.issues.createLabel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          owner: "hivemoot",
+          repo: "repo-a",
+        })
+      );
+    });
+
+    it("should bootstrap labels from installation_repositories.added payload repositories", async () => {
+      const { handlers } = createWebhookHarness();
+      const handler = handlers.get("installation_repositories.added");
+      expect(handler).toBeDefined();
+
+      const octokit = createInstallationOctokit();
+      await handler!({
+        octokit,
+        log: {
+          info: vi.fn(),
+          error: vi.fn(),
+        },
+        payload: {
+          repositories_added: [
+            {
+              name: "repo-b",
+              full_name: "hivemoot/repo-b",
+            },
+          ],
+        },
+      });
+
+      expect(octokit.rest.apps.listReposAccessibleToInstallation).not.toHaveBeenCalled();
+      expect(octokit.rest.issues.createLabel).toHaveBeenCalledTimes(REQUIRED_REPOSITORY_LABELS.length);
+      expect(octokit.rest.issues.createLabel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          owner: "hivemoot",
+          repo: "repo-b",
+        })
+      );
+    });
+
+    it("should fetch installation repositories when installation.created payload omits repositories", async () => {
+      const { handlers } = createWebhookHarness();
+      const handler = handlers.get("installation.created");
+      expect(handler).toBeDefined();
+
+      const fallbackRepositories = [
+        { name: "repo-c", full_name: "hivemoot/repo-c" },
+        { name: "repo-d", full_name: "hivemoot/repo-d" },
+      ];
+      const octokit = createInstallationOctokit({ fallbackRepositories });
+
+      await handler!({
+        octokit,
+        log: {
+          info: vi.fn(),
+          error: vi.fn(),
+        },
+        payload: {},
+      });
+
+      expect(octokit.rest.apps.listReposAccessibleToInstallation).toHaveBeenCalledWith({
+        per_page: 100,
+        page: 1,
+      });
+      expect(octokit.rest.issues.createLabel).toHaveBeenCalledTimes(
+        REQUIRED_REPOSITORY_LABELS.length * fallbackRepositories.length
+      );
+      expect(octokit.rest.issues.createLabel).toHaveBeenCalledWith(
+        expect.objectContaining({ repo: "repo-c" })
+      );
+      expect(octokit.rest.issues.createLabel).toHaveBeenCalledWith(
+        expect.objectContaining({ repo: "repo-d" })
+      );
+    });
+
+    it("should fetch installation repositories when installation_repositories.added payload is empty", async () => {
+      const { handlers } = createWebhookHarness();
+      const handler = handlers.get("installation_repositories.added");
+      expect(handler).toBeDefined();
+
+      const fallbackRepositories = [{ name: "repo-e", full_name: "hivemoot/repo-e" }];
+      const octokit = createInstallationOctokit({ fallbackRepositories });
+
+      await handler!({
+        octokit,
+        log: {
+          info: vi.fn(),
+          error: vi.fn(),
+        },
+        payload: {
+          repositories_added: [],
+        },
+      });
+
+      expect(octokit.rest.apps.listReposAccessibleToInstallation).toHaveBeenCalledWith({
+        per_page: 100,
+        page: 1,
+      });
+      expect(octokit.rest.issues.createLabel).toHaveBeenCalledTimes(
+        REQUIRED_REPOSITORY_LABELS.length * fallbackRepositories.length
+      );
+      expect(octokit.rest.issues.createLabel).toHaveBeenCalledWith(
+        expect.objectContaining({ repo: "repo-e" })
+      );
+    });
+  });
+
   describe("Issue Handler via GovernanceService", () => {
     const createMockOctokit = () => ({
       rest: {

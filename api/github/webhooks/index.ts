@@ -66,6 +66,23 @@ interface InstallationRepoPayload {
   full_name: string;
 }
 
+interface InstallationRepoListClient {
+  rest: {
+    apps: {
+      listReposAccessibleToInstallation: (params: {
+        per_page?: number;
+        page?: number;
+      }) => Promise<{
+        data: {
+          repositories?: InstallationRepoPayload[];
+        };
+      }>;
+    };
+  };
+}
+
+const INSTALLATION_REPO_PAGE_SIZE = 100;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper Functions
 // ─────────────────────────────────────────────────────────────────────────────
@@ -84,20 +101,77 @@ function getRepoContext(repository: InstallationRepoPayload): RepoContext {
   };
 }
 
+function hasInstallationRepoListClient(octokit: unknown): octokit is InstallationRepoListClient {
+  if (typeof octokit !== "object" || octokit === null) {
+    return false;
+  }
+
+  const client = octokit as {
+    rest?: {
+      apps?: {
+        listReposAccessibleToInstallation?: unknown;
+      };
+    };
+  };
+
+  return typeof client.rest?.apps?.listReposAccessibleToInstallation === "function";
+}
+
+async function listAccessibleInstallationRepositories(
+  octokit: unknown,
+  eventName: string
+): Promise<InstallationRepoPayload[]> {
+  if (!hasInstallationRepoListClient(octokit)) {
+    throw new Error(
+      `[${eventName}] Unable to list installation repositories: missing apps.listReposAccessibleToInstallation`
+    );
+  }
+
+  const repositories: InstallationRepoPayload[] = [];
+  let page = 1;
+
+  while (true) {
+    const { data } = await octokit.rest.apps.listReposAccessibleToInstallation({
+      per_page: INSTALLATION_REPO_PAGE_SIZE,
+      page,
+    });
+
+    const pageRepositories = Array.isArray(data.repositories) ? data.repositories : [];
+    repositories.push(...pageRepositories);
+
+    if (pageRepositories.length < INSTALLATION_REPO_PAGE_SIZE) {
+      break;
+    }
+    page += 1;
+  }
+
+  return repositories;
+}
+
 async function ensureLabelsForRepositories(
   context: LabelBootstrapContext,
-  repositories: readonly InstallationRepoPayload[],
+  repositories: readonly InstallationRepoPayload[] | undefined,
   eventName: string
 ): Promise<void> {
-  if (repositories.length === 0) {
-    context.log.info(`[${eventName}] No repositories in payload; skipping label bootstrap`);
+  const payloadRepositories = repositories ?? [];
+  let targetRepositories = payloadRepositories;
+
+  if (targetRepositories.length === 0) {
+    context.log.info(
+      `[${eventName}] Repository list missing from payload; fetching installation repositories`
+    );
+    targetRepositories = await listAccessibleInstallationRepositories(context.octokit, eventName);
+  }
+
+  if (targetRepositories.length === 0) {
+    context.log.info(`[${eventName}] No installation repositories available; skipping label bootstrap`);
     return;
   }
 
   const labelService = createRepositoryLabelService(context.octokit);
   const errors: Error[] = [];
 
-  for (const repository of repositories) {
+  for (const repository of targetRepositories) {
     const { owner, repo, fullName } = getRepoContext(repository);
     try {
       const result = await labelService.ensureRequiredLabels(owner, repo);
@@ -115,7 +189,7 @@ async function ensureLabelsForRepositories(
   }
 }
 
-function app(probotApp: Probot): void {
+export function app(probotApp: Probot): void {
   probotApp.log.info("Queen bot initialized");
 
   /**
@@ -124,7 +198,7 @@ function app(probotApp: Probot): void {
   probotApp.on("installation.created", async (context) => {
     await ensureLabelsForRepositories(
       context,
-      context.payload.repositories ?? [],
+      context.payload.repositories,
       "installation.created"
     );
   });
@@ -135,7 +209,7 @@ function app(probotApp: Probot): void {
   probotApp.on("installation_repositories.added", async (context) => {
     await ensureLabelsForRepositories(
       context,
-      context.payload.repositories_added ?? [],
+      context.payload.repositories_added,
       "installation_repositories.added"
     );
   });
