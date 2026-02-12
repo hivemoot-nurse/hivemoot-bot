@@ -9,7 +9,6 @@
  */
 
 import {
-  SIGNATURES,
   parseMetadata,
   isVotingComment,
   isHumanHelpComment,

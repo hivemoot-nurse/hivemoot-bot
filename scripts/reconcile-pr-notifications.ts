@@ -143,7 +143,7 @@ export async function reconcileIssue(
       let bodyLastEditedAt: Date | null = null;
       try {
         bodyLastEditedAt = await getPRBodyLastEditedAt(octokit, owner, repo, linkedPR.number);
-      } catch (editError) {
+      } catch {
         logger.warn(
           `Failed to fetch PR body edit time for PR #${linkedPR.number}, proceeding without it`
         );

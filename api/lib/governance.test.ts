@@ -77,8 +77,9 @@ describe("GovernanceService", () => {
     });
 
     it("should run label and comment in parallel", async () => {
-      const addLabelsPromise = new Promise((resolve) => setTimeout(resolve, 10));
-      const commentPromise = new Promise((resolve) => setTimeout(resolve, 10));
+      const delayMs = 50;
+      const addLabelsPromise = new Promise((resolve) => setTimeout(resolve, delayMs));
+      const commentPromise = new Promise((resolve) => setTimeout(resolve, delayMs));
 
       vi.mocked(mockIssues.addLabels).mockReturnValue(addLabelsPromise as Promise<void>);
       vi.mocked(mockIssues.comment).mockReturnValue(commentPromise as Promise<void>);
@@ -87,8 +88,8 @@ describe("GovernanceService", () => {
       await governance.startDiscussion(testRef);
       const elapsed = Date.now() - startTime;
 
-      // If run in parallel, should take ~10ms, not ~20ms
-      expect(elapsed).toBeLessThan(20);
+      // If run in parallel, it should be close to delayMs, not roughly 2 * delayMs.
+      expect(elapsed).toBeLessThan(90);
     });
   });
 

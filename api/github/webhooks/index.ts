@@ -17,7 +17,6 @@ import {
   getLinkedIssues,
 } from "../../lib/graphql-queries.js";
 import { filterByLabel } from "../../lib/types.js";
-import type { LinkedIssue } from "../../lib/types.js";
 import { validateEnv, getAppId } from "../../lib/env-validation.js";
 import {
   processImplementationIntake,
