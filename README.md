@@ -163,6 +163,8 @@ npm run typecheck
 npm run build
 ```
 
+For contribution workflows, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 Useful scripts:
 
 - `npm run close-discussions`
