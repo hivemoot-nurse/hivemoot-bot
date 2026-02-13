@@ -539,7 +539,7 @@ export class GovernanceService {
     );
     await this.issues.comment(ref, errorComment);
 
-    // Add the needs:human label to make the issue visible in issue lists
+    // Add the hivemoot:needs-human label to make the issue visible in issue lists
     // Note: Label addition is best-effort - if the label doesn't exist in the repo,
     // we log a warning but don't fail the operation (the comment is the critical part)
     try {

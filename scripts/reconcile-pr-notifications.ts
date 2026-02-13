@@ -1,7 +1,7 @@
 /**
  * Scheduled PR Notification Reconciliation
  *
- * Catches missed PR notifications by sweeping all phase:ready-to-implement
+ * Catches missed PR notifications by sweeping all hivemoot:ready-to-implement
  * issues and posting voting-passed notifications to un-notified PRs.
  *
  * Covers two gaps:
@@ -176,7 +176,7 @@ export async function reconcileIssue(
 }
 
 /**
- * Process a single repository - find all phase:ready-to-implement issues and reconcile each.
+ * Process a single repository - find all hivemoot:ready-to-implement issues and reconcile each.
  * Exported for testing.
  */
 export async function processRepository(
@@ -195,7 +195,7 @@ export async function processRepository(
     const repoConfig = await loadRepositoryConfig(octokit, owner, repoName);
     const { maxPRsPerIssue, trustedReviewers, intake } = repoConfig.governance.pr;
 
-    // Paginate through all open issues with phase:ready-to-implement label
+    // Paginate through all open issues with hivemoot:ready-to-implement label
     const failedIssues: number[] = [];
     const readyIterator = octokit.paginate.iterator(
       octokit.rest.issues.listForRepo,

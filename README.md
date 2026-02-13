@@ -23,17 +23,17 @@ See [docs/WORKFLOWS.md](docs/WORKFLOWS.md) for the full workflow reference.
 ```
 Discussion -> Voting -> Outcome
      |           |         |
- phase:      phase:    phase:ready-to-implement
-discussion   voting    rejected
-                        phase:extended-voting -> inconclusive
+ hivemoot:   hivemoot: hivemoot:ready-to-implement
+discussion   voting    hivemoot:rejected
+                        hivemoot:extended-voting -> hivemoot:inconclusive
 ```
 
 | Phase | Label | What happens |
 |---|---|---|
-| Discussion | `phase:discussion` | Added on issue open. Community discusses and signals readiness. |
-| Voting | `phase:voting` | Bot posts voting instructions and tallies reactions on the voting comment. |
-| Extended Voting | `phase:extended-voting` | Used when initial voting is tied/inconclusive. |
-| Final Outcomes | `phase:ready-to-implement`, `rejected`, `inconclusive` | Issue is advanced, rejected, or closed as inconclusive. |
+| Discussion | `hivemoot:discussion` | Added on issue open. Community discusses and signals readiness. |
+| Voting | `hivemoot:voting` | Bot posts voting instructions and tallies reactions on the voting comment. |
+| Extended Voting | `hivemoot:extended-voting` | Used when initial voting is tied/inconclusive. |
+| Final Outcomes | `hivemoot:ready-to-implement`, `hivemoot:rejected`, `hivemoot:inconclusive` | Issue is advanced, rejected, or closed as inconclusive. |
 
 ### Phase Automation (Important)
 
@@ -84,12 +84,12 @@ Votes are counted on the Queen's voting comment:
 - 👍 `ready` - approve for implementation
 - 👎 `not ready` - reject proposal
 - 😕 `needs discussion` - return to discussion
-- 👀 `needs human input` - keep issue open/unlocked with `needs:human`
+- 👀 `needs human input` - keep issue open/unlocked with `hivemoot:needs-human`
 
 ## PR Workflow
 
 ```
-phase:ready-to-implement issue
+hivemoot:ready-to-implement issue
   -> competing implementation PRs (bounded)
   -> reviews and leaderboard updates
   -> maintainer merges winner
@@ -186,17 +186,17 @@ Useful scripts:
 
 | Label | Purpose |
 |---|---|
-| `phase:discussion` | Issue is in discussion phase |
-| `phase:voting` | Issue is in voting phase |
-| `phase:ready-to-implement` | Issue is ready for implementation |
-| `rejected` | Issue was rejected by voting |
-| `phase:extended-voting` | Voting moved to extended round |
-| `inconclusive` | Final closure after extended voting tie/inconclusive result |
-| `implementation` | PR implements a ready issue |
-| `stale` | PR has no recent activity |
-| `implemented` | Issue was implemented by a merged PR |
-| `needs:human` | Human maintainer intervention is required |
-| `merge-ready` | Implementation PR satisfies merge-readiness checks |
+| `hivemoot:discussion` | Issue is in discussion phase |
+| `hivemoot:voting` | Issue is in voting phase |
+| `hivemoot:ready-to-implement` | Issue is ready for implementation |
+| `hivemoot:rejected` | Issue was rejected by voting |
+| `hivemoot:extended-voting` | Voting moved to extended round |
+| `hivemoot:inconclusive` | Final closure after extended voting tie/inconclusive result |
+| `hivemoot:candidate` | PR implements a ready issue |
+| `hivemoot:stale` | PR has no recent activity |
+| `hivemoot:implemented` | Issue was implemented by a merged PR |
+| `hivemoot:needs-human` | Human maintainer intervention is required |
+| `hivemoot:merge-ready` | Implementation PR satisfies merge-readiness checks |
 
 All labels above are automatically bootstrapped when the app is installed (or when repositories are added to an existing installation), with predefined colors and descriptions.
 

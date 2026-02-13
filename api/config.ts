@@ -205,7 +205,7 @@ ${formatVotes(votes)}
 
 The hive has spoken — this issue needs a human to weigh in. The issue remains open and unlocked for human response.
 
-Remove the \`needs:human\` label when you've addressed the concern.${SIGNATURE}`,
+Remove the \`hivemoot:needs-human\` label when you've addressed the concern.${SIGNATURE}`,
 
   // Posted when voting ends with tie/no votes (first round - extended voting begins)
   votingEndInconclusive: (votes: { thumbsUp: number; thumbsDown: number; confused: number; eyes: number }) => `# 🐝 Extended Voting ⚖️
@@ -283,7 +283,7 @@ A maintainer can reopen if circumstances change.${SIGNATURE}`,
 
 *adjusts tiny crown nervously*
 
-Look, I hate to admit it, but I need help. This issue has a \`voting\` or \`phase:extended-voting\` label, but I can't find my voting comment anywhere. I've checked under every honeycomb. Nothing.
+Look, I hate to admit it, but I need help. This issue has a \`hivemoot:voting\` or \`hivemoot:extended-voting\` label, but I can't find my voting comment anywhere. I've checked under every honeycomb. Nothing.
 
 The hive usually handles everything autonomously, but this one has me stumped.
 
@@ -304,18 +304,46 @@ The hive usually handles everything autonomously, but this one has me stumped.
 // ───────────────────────────────────────────────────────────────────────────────
 
 export const LABELS = {
-  DISCUSSION: "phase:discussion",
-  VOTING: "phase:voting",
-  READY_TO_IMPLEMENT: "phase:ready-to-implement",
-  REJECTED: "rejected",
-  EXTENDED_VOTING: "phase:extended-voting",
-  INCONCLUSIVE: "inconclusive",
-  IMPLEMENTATION: "implementation",
-  STALE: "stale",
-  IMPLEMENTED: "implemented",
-  NEEDS_HUMAN: "needs:human",
-  MERGE_READY: "merge-ready",
+  DISCUSSION: "hivemoot:discussion",
+  VOTING: "hivemoot:voting",
+  READY_TO_IMPLEMENT: "hivemoot:ready-to-implement",
+  REJECTED: "hivemoot:rejected",
+  EXTENDED_VOTING: "hivemoot:extended-voting",
+  INCONCLUSIVE: "hivemoot:inconclusive",
+  IMPLEMENTATION: "hivemoot:candidate",
+  STALE: "hivemoot:stale",
+  IMPLEMENTED: "hivemoot:implemented",
+  NEEDS_HUMAN: "hivemoot:needs-human",
+  MERGE_READY: "hivemoot:merge-ready",
 } as const;
+
+/**
+ * Maps old label names to canonical new names.
+ * Enables dual support during transition: old labels are recognized on read,
+ * new labels are used on write.
+ */
+export const LEGACY_LABEL_MAP: Record<string, string> = {
+  "phase:discussion": LABELS.DISCUSSION,
+  "phase:voting": LABELS.VOTING,
+  "phase:extended-voting": LABELS.EXTENDED_VOTING,
+  "phase:ready-to-implement": LABELS.READY_TO_IMPLEMENT,
+  "rejected": LABELS.REJECTED,
+  "inconclusive": LABELS.INCONCLUSIVE,
+  "implementation": LABELS.IMPLEMENTATION,
+  "stale": LABELS.STALE,
+  "implemented": LABELS.IMPLEMENTED,
+  "needs:human": LABELS.NEEDS_HUMAN,
+  "merge-ready": LABELS.MERGE_READY,
+};
+
+/**
+ * Check if a label name matches a LABELS value, supporting legacy names.
+ * Returns true if `name` equals the canonical label or maps to it via LEGACY_LABEL_MAP.
+ */
+export function isLabelMatch(name: string | undefined, label: string): boolean {
+  if (!name) return false;
+  return name === label || LEGACY_LABEL_MAP[name] === label;
+}
 
 export interface RepositoryLabelDefinition {
   name: string;

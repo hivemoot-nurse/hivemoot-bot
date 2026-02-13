@@ -8,7 +8,7 @@
 import type { PRRef } from "./types.js";
 import { validateClient, PR_CLIENT_CHECKS } from "./client-validation.js";
 import { isNotificationComment } from "./bot-comments.js";
-import { LABELS } from "../config.js";
+import { LABELS, isLabelMatch } from "../config.js";
 
 /**
  * Minimal GitHub client interface for PR operations.
@@ -334,10 +334,10 @@ export class PROperations {
   }
 
   /**
-   * Check if PR has a specific label
+   * Check if PR has a specific label (supports legacy label names)
    */
   hasLabel(pr: { labels: Array<{ name: string }> }, labelName: string): boolean {
-    return pr.labels.some((label) => label.name === labelName);
+    return pr.labels.some((label) => isLabelMatch(label.name, labelName));
   }
 
   /**

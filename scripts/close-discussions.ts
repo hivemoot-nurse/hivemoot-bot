@@ -543,9 +543,9 @@ export async function notifyPendingPRs(
 // ───────────────────────────────────────────────────────────────────────────────
 
 /**
- * Reconcile missing voting comments for phase:voting issues.
+ * Reconcile missing voting comments for hivemoot:voting issues.
  *
- * Iterates all open issues with the phase:voting label and calls
+ * Iterates all open issues with the hivemoot:voting label and calls
  * governance.postVotingComment() on each. Since postVotingComment is
  * idempotent (skips when a voting comment already exists), this is safe
  * to call on every cron run. Errors on individual issues are logged
@@ -850,7 +850,7 @@ async function main(): Promise<void> {
         logger.warn(
           `${allSkippedIssues.length} issue(s) skipped due to missing voting comments: ${skippedList}`
         );
-        logger.warn("Human intervention requested for these issues (see needs:human label)");
+        logger.warn("Human intervention requested for these issues (see hivemoot:needs-human label)");
         core.warning(`${allSkippedIssues.length} issue(s) require human intervention`);
       }
 

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { SIGNATURES, parseMetadata, NOTIFICATION_TYPES, type NotificationMetadata } from "./lib/bot-comments.js";
+import { isLabelMatch, LEGACY_LABEL_MAP, LABELS } from "./config.js";
 
 /**
  * Tests for config.ts
@@ -132,7 +133,7 @@ describe("config", () => {
     it("should export READY_TO_IMPLEMENT label (not ACCEPTED)", async () => {
       const config = await import("./config.js");
 
-      expect(config.LABELS.READY_TO_IMPLEMENT).toBe("phase:ready-to-implement");
+      expect(config.LABELS.READY_TO_IMPLEMENT).toBe("hivemoot:ready-to-implement");
       expect((config.LABELS as Record<string, string>).ACCEPTED).toBeUndefined();
     });
 
@@ -146,6 +147,93 @@ describe("config", () => {
         expect(label.color).toMatch(/^[0-9a-f]{6}$/);
         expect(label.description.length).toBeGreaterThan(0);
       }
+    });
+  });
+
+  describe("isLabelMatch", () => {
+    it("should match canonical label names exactly", () => {
+      expect(isLabelMatch("hivemoot:discussion", LABELS.DISCUSSION)).toBe(true);
+      expect(isLabelMatch("hivemoot:voting", LABELS.VOTING)).toBe(true);
+      expect(isLabelMatch("hivemoot:ready-to-implement", LABELS.READY_TO_IMPLEMENT)).toBe(true);
+      expect(isLabelMatch("hivemoot:candidate", LABELS.IMPLEMENTATION)).toBe(true);
+      expect(isLabelMatch("hivemoot:merge-ready", LABELS.MERGE_READY)).toBe(true);
+    });
+
+    it("should match legacy label names via LEGACY_LABEL_MAP", () => {
+      expect(isLabelMatch("phase:discussion", LABELS.DISCUSSION)).toBe(true);
+      expect(isLabelMatch("phase:voting", LABELS.VOTING)).toBe(true);
+      expect(isLabelMatch("phase:extended-voting", LABELS.EXTENDED_VOTING)).toBe(true);
+      expect(isLabelMatch("phase:ready-to-implement", LABELS.READY_TO_IMPLEMENT)).toBe(true);
+      expect(isLabelMatch("rejected", LABELS.REJECTED)).toBe(true);
+      expect(isLabelMatch("inconclusive", LABELS.INCONCLUSIVE)).toBe(true);
+      expect(isLabelMatch("implementation", LABELS.IMPLEMENTATION)).toBe(true);
+      expect(isLabelMatch("stale", LABELS.STALE)).toBe(true);
+      expect(isLabelMatch("implemented", LABELS.IMPLEMENTED)).toBe(true);
+      expect(isLabelMatch("needs:human", LABELS.NEEDS_HUMAN)).toBe(true);
+      expect(isLabelMatch("merge-ready", LABELS.MERGE_READY)).toBe(true);
+    });
+
+    it("should return false for unrelated label names", () => {
+      expect(isLabelMatch("bug", LABELS.DISCUSSION)).toBe(false);
+      expect(isLabelMatch("enhancement", LABELS.VOTING)).toBe(false);
+      expect(isLabelMatch("random-label", LABELS.IMPLEMENTATION)).toBe(false);
+    });
+
+    it("should return false for undefined name", () => {
+      expect(isLabelMatch(undefined, LABELS.DISCUSSION)).toBe(false);
+    });
+
+    it("should return false when legacy name is compared against wrong canonical label", () => {
+      // "phase:discussion" maps to LABELS.DISCUSSION, not LABELS.VOTING
+      expect(isLabelMatch("phase:discussion", LABELS.VOTING)).toBe(false);
+      expect(isLabelMatch("implementation", LABELS.STALE)).toBe(false);
+    });
+  });
+
+  describe("LEGACY_LABEL_MAP", () => {
+    it("should map every legacy name to a valid LABELS value", () => {
+      const validLabelValues = new Set(Object.values(LABELS));
+
+      for (const [legacyName, canonicalName] of Object.entries(LEGACY_LABEL_MAP)) {
+        expect(validLabelValues.has(canonicalName as typeof LABELS[keyof typeof LABELS])).toBe(true);
+        // Sanity check: the legacy name must differ from the canonical name
+        // (otherwise it wouldn't need a mapping)
+        expect(legacyName).not.toBe(canonicalName);
+      }
+    });
+
+    it("should cover all known legacy label names", () => {
+      const expectedLegacyNames = [
+        "phase:discussion",
+        "phase:voting",
+        "phase:extended-voting",
+        "phase:ready-to-implement",
+        "rejected",
+        "inconclusive",
+        "implementation",
+        "stale",
+        "implemented",
+        "needs:human",
+        "merge-ready",
+      ];
+
+      for (const legacyName of expectedLegacyNames) {
+        expect(LEGACY_LABEL_MAP).toHaveProperty(legacyName);
+      }
+    });
+
+    it("should map to the correct canonical name for each legacy name", () => {
+      expect(LEGACY_LABEL_MAP["phase:discussion"]).toBe(LABELS.DISCUSSION);
+      expect(LEGACY_LABEL_MAP["phase:voting"]).toBe(LABELS.VOTING);
+      expect(LEGACY_LABEL_MAP["phase:extended-voting"]).toBe(LABELS.EXTENDED_VOTING);
+      expect(LEGACY_LABEL_MAP["phase:ready-to-implement"]).toBe(LABELS.READY_TO_IMPLEMENT);
+      expect(LEGACY_LABEL_MAP["rejected"]).toBe(LABELS.REJECTED);
+      expect(LEGACY_LABEL_MAP["inconclusive"]).toBe(LABELS.INCONCLUSIVE);
+      expect(LEGACY_LABEL_MAP["implementation"]).toBe(LABELS.IMPLEMENTATION);
+      expect(LEGACY_LABEL_MAP["stale"]).toBe(LABELS.STALE);
+      expect(LEGACY_LABEL_MAP["implemented"]).toBe(LABELS.IMPLEMENTED);
+      expect(LEGACY_LABEL_MAP["needs:human"]).toBe(LABELS.NEEDS_HUMAN);
+      expect(LEGACY_LABEL_MAP["merge-ready"]).toBe(LABELS.MERGE_READY);
     });
   });
 

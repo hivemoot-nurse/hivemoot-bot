@@ -616,7 +616,7 @@ describe("close-discussions script", () => {
         { number: 20, title: "New PR", state: "OPEN", author: { login: "agent-bob" } },
       ]);
       mockFindPRsWithLabel.mockResolvedValue([
-        { number: 10, createdAt: new Date(), updatedAt: new Date(), labels: [{ name: "implementation" }] },
+        { number: 10, createdAt: new Date(), updatedAt: new Date(), labels: [{ name: "hivemoot:candidate" }] },
       ]);
 
       await notifyPendingPRs(fakeOctokit, appId, owner, repo, issueNumber);

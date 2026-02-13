@@ -4,6 +4,7 @@ import {
   LABELS,
   MESSAGES,
   PR_MESSAGES,
+  isLabelMatch,
 } from "../../config.js";
 import {
   createIssueOperations,
@@ -623,7 +624,7 @@ export function app(probotApp: Probot): void {
    * Adding `implementation` may qualify the PR; removing it should strip `merge-ready`.
    */
   probotApp.on(["pull_request.labeled", "pull_request.unlabeled"], async (context) => {
-    if (context.payload.label?.name !== LABELS.IMPLEMENTATION) return;
+    if (!isLabelMatch(context.payload.label?.name, LABELS.IMPLEMENTATION)) return;
 
     const { number } = context.payload.pull_request;
     const { owner, repo, fullName } = getRepoContext(context.payload.repository);
@@ -809,12 +810,12 @@ export function app(probotApp: Probot): void {
    */
   probotApp.on("issues.labeled", async (context) => {
     const { label, issue, sender } = context.payload;
-    if (label?.name !== LABELS.VOTING) return;
+    if (!isLabelMatch(label?.name, LABELS.VOTING)) return;
     if (sender.type === "Bot") return;
 
     const { owner, repo, fullName } = getRepoContext(context.payload.repository);
     context.log.info(
-      `Manual phase:voting label on issue #${issue.number} in ${fullName} (by ${sender.login})`,
+      `Manual voting label on issue #${issue.number} in ${fullName} (by ${sender.login})`,
     );
 
     try {
