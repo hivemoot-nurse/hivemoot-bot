@@ -77,6 +77,15 @@ governance:
 - `extendedVoting.exits` controls extended-voting timing and early exits.
 - If `extendedVoting.exits` is omitted, it defaults to manual mode.
 
+### Voting Signals
+
+Votes are counted on the Queen's voting comment:
+
+- 👍 `ready` - approve for implementation
+- 👎 `not ready` - reject proposal
+- 😕 `needs discussion` - return to discussion
+- 👀 `needs human input` - keep issue open/unlocked with `needs:human`
+
 ## PR Workflow
 
 ```

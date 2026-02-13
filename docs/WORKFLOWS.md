@@ -17,7 +17,7 @@ Issues go through a timed governance lifecycle with community voting.
    label added                     label added                 • "rejected" → closed & locked
  • Welcome comment               • Voting comment              • "phase:extended-voting" → extended voting
    posted                          posted                            │
-                                 • 👍/👎/😕 reactions                 ▼
+                                 • 👍/👎/😕/👀 reactions              ▼
                                    on voting comment           Extended voting (24 hrs*)
                                                                      │
                                                                      ▼
@@ -40,14 +40,16 @@ Scheduled transitions are controlled per phase via `exits[].type`:
 **Voting Phase**
 - Triggered: After discussion duration expires
 - Actions: Swap labels, post voting instructions comment
-- Community: React to the **bot's voting comment** with:
+- Community: React to the **Queen's voting comment** with:
   - 👍 to support
   - 👎 to oppose
   - 😕 to abstain/need more info
+  - 👀 to request human intervention
 
 **Outcome**
 - **Ready to implement:** 👍 > 👎 — issue stays open for implementation, locked
 - **Rejected:** 👎 > 👍 — issue is closed and locked
+- **Needs human input:** 👀 is the winning signal — issue remains open and unlocked with `needs:human`
 - **Inconclusive:** tie (including 0-0) — enters extended voting round (`phase:extended-voting`)
 
 **Extended Voting** (for inconclusive outcomes)
@@ -60,13 +62,13 @@ Scheduled transitions are controlled per phase via `exits[].type`:
 
 ### Vote Counting
 
-Votes are counted from the bot's voting comment reactions (not issue reactions). This ensures:
+Votes are counted from the Queen's voting comment reactions (not issue reactions). This ensures:
 - Clear voting period boundaries
 - Votes cast during discussion don't count
 - Transparent, auditable results
 
 Additional rules apply to keep voting fair and deterministic:
-- Only 👍/👎/😕 reactions on the bot’s voting comment are counted; all other reactions are ignored.
+- Only 👍/👎/😕/👀 reactions on the Queen's voting comment are counted; all other reactions are ignored.
 - If a user reacts with more than one voting reaction type, **all** of their votes are discarded from the tally and they do not count toward quorum.
 - Each voting exit specifies its own `minVoters` (quorum) and `requiredVoters` (participation requirement). If quorum or required-voter participation is not met, the outcome is forced to **extended voting** (or **inconclusive** if already in extended voting).
 - Multiple exits can be configured with different time gates and conditions. Early exits (all except the last) are evaluated first-match-wins. The last exit is the deadline.
