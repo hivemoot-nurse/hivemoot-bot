@@ -20,27 +20,7 @@ If you want to contribute:
 
 ## Contribution Workflow
 
-All contributions go through branches and pull requests. Direct pushes to `main` are not allowed.
-
-### Branch and PR (upstream collaborators)
-
-```bash
-git checkout -b your-branch-name
-# make changes
-npm test
-npm run typecheck
-git add <specific-files>
-git commit -m "short subject (under 72 chars)
-
-Explain why this change was made. Focus on the motivation
-and any non-obvious decisions."
-git push -u origin your-branch-name
-gh pr create --base main --fill
-```
-
-### Fork and PR (external contributors)
-
-If you don't have push access to the upstream repo, fork it first:
+This repo uses a fork-based PR workflow. Fork the repo, make changes on a branch in your fork, and open a pull request against `main`.
 
 ```bash
 gh repo fork hivemoot/hivemoot-bot --clone
@@ -60,6 +40,10 @@ gh pr create \
   --head YOUR_GITHUB_LOGIN:your-branch-name \
   --fill
 ```
+
+Maintainers make the final decision to merge. Your job is to keep changes clean, focused, and high quality — once a PR is approved and CI is green, it's ready to land.
+
+If you hit a blocker, note it once on the thread and move on to other work.
 
 ### Commit Message Format
 

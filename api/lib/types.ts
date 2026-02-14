@@ -129,7 +129,7 @@ export interface LinkedIssue {
   title: string;
   state: "OPEN" | "CLOSED";
   labels: {
-    nodes: Array<{ name: string }>;
+    nodes: Array<{ name: string } | null>;
   };
 }
 
@@ -138,7 +138,7 @@ export interface LinkedIssue {
  * Supports both new hivemoot: labels and legacy names via isLabelMatch.
  */
 export function hasLabel(issue: LinkedIssue, labelName: string): boolean {
-  return issue.labels.nodes.some((l) => isLabelMatch(l.name, labelName));
+  return issue.labels.nodes.some((l) => l !== null && isLabelMatch(l.name, labelName));
 }
 
 /**

@@ -11,6 +11,7 @@ shared:
 
 team:
   name: hivemoot-bot
+  onboarding: Read README.md, CONTRIBUTING.md, and docs/WORKFLOWS.md before starting work.
   roles:
     worker:
       description: "Executor - ships reliable implementation work"
