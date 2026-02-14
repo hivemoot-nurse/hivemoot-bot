@@ -4,6 +4,8 @@
  * Common types used across webhooks and scheduled scripts.
  */
 
+import { isLabelMatch } from "../config.js";
+
 /**
  * Minimal GitHub issue representation for governance operations
  */
@@ -71,7 +73,7 @@ export interface ValidatedVoteResult {
  * "skipped" indicates the voting comment was not found and human help was requested.
  */
 export type VotingOutcome =
-  | "phase:ready-to-implement"
+  | "ready-to-implement"
   | "rejected"
   | "inconclusive"
   | "needs-more-discussion"
@@ -133,10 +135,10 @@ export interface LinkedIssue {
 
 /**
  * Check if a linked issue has a specific label.
- * Useful for filtering phase:ready-to-implement/rejected issues in webhook handlers.
+ * Supports both new hivemoot: labels and legacy names via isLabelMatch.
  */
 export function hasLabel(issue: LinkedIssue, labelName: string): boolean {
-  return issue.labels.nodes.some((l) => l !== null && l.name === labelName);
+  return issue.labels.nodes.some((l) => l !== null && isLabelMatch(l.name, labelName));
 }
 
 /**

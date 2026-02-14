@@ -4,6 +4,7 @@ import {
   LABELS,
   MESSAGES,
   PR_MESSAGES,
+  isLabelMatch,
 } from "../../config.js";
 import {
   createIssueOperations,
@@ -65,6 +66,7 @@ interface LabelBootstrapSummary {
   reposProcessed: number;
   reposFailed: number;
   labelsCreated: number;
+  labelsRenamed: number;
   labelsSkipped: number;
 }
 
@@ -186,6 +188,7 @@ async function ensureLabelsForRepositories(
     reposProcessed: targetRepositories.length,
     reposFailed: 0,
     labelsCreated: 0,
+    labelsRenamed: 0,
     labelsSkipped: 0,
   };
 
@@ -194,9 +197,10 @@ async function ensureLabelsForRepositories(
     try {
       const result = await labelService.ensureRequiredLabels(owner, repo);
       summary.labelsCreated += result.created;
+      summary.labelsRenamed += result.renamed;
       summary.labelsSkipped += result.skipped;
       context.log.info(
-        `[${eventName}] Ensured labels in ${fullName}: created=${result.created}, skipped=${result.skipped}`
+        `[${eventName}] Ensured labels in ${fullName}: created=${result.created}, renamed=${result.renamed}, skipped=${result.skipped}`
       );
     } catch (error) {
       summary.reposFailed += 1;
@@ -206,7 +210,7 @@ async function ensureLabelsForRepositories(
   }
 
   context.log.info(
-    `[${eventName}] Label bootstrap summary: reposProcessed=${summary.reposProcessed}, reposFailed=${summary.reposFailed}, labelsCreated=${summary.labelsCreated}, labelsSkipped=${summary.labelsSkipped}`
+    `[${eventName}] Label bootstrap summary: reposProcessed=${summary.reposProcessed}, reposFailed=${summary.reposFailed}, labelsCreated=${summary.labelsCreated}, labelsRenamed=${summary.labelsRenamed}, labelsSkipped=${summary.labelsSkipped}`
   );
 
   if (errors.length > 0) {
@@ -623,7 +627,7 @@ export function app(probotApp: Probot): void {
    * Adding `implementation` may qualify the PR; removing it should strip `merge-ready`.
    */
   probotApp.on(["pull_request.labeled", "pull_request.unlabeled"], async (context) => {
-    if (context.payload.label?.name !== LABELS.IMPLEMENTATION) return;
+    if (!isLabelMatch(context.payload.label?.name, LABELS.IMPLEMENTATION)) return;
 
     const { number } = context.payload.pull_request;
     const { owner, repo, fullName } = getRepoContext(context.payload.repository);
@@ -809,12 +813,12 @@ export function app(probotApp: Probot): void {
    */
   probotApp.on("issues.labeled", async (context) => {
     const { label, issue, sender } = context.payload;
-    if (label?.name !== LABELS.VOTING) return;
+    if (!isLabelMatch(label?.name, LABELS.VOTING)) return;
     if (sender.type === "Bot") return;
 
     const { owner, repo, fullName } = getRepoContext(context.payload.repository);
     context.log.info(
-      `Manual phase:voting label on issue #${issue.number} in ${fullName} (by ${sender.login})`,
+      `Manual voting label on issue #${issue.number} in ${fullName} (by ${sender.login})`,
     );
 
     try {

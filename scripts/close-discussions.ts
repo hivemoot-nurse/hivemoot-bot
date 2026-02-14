@@ -12,7 +12,7 @@
 
 import { Octokit } from "octokit";
 import * as core from "@actions/core";
-import { LABELS, PR_MESSAGES } from "../api/config.js";
+import { LABELS, PR_MESSAGES, getLabelQueryAliases } from "../api/config.js";
 import {
   createIssueOperations,
   createPROperations,
@@ -267,7 +267,7 @@ export function makeEarlyDecisionCheck(
       validatedVotes: validated,
     });
     trackOutcome(outcome, ref.issueNumber);
-    if (outcome === "phase:ready-to-implement") {
+    if (outcome === "ready-to-implement") {
       await notifyPRs(ref.issueNumber);
     }
     return true;
@@ -543,9 +543,9 @@ export async function notifyPendingPRs(
 // ───────────────────────────────────────────────────────────────────────────────
 
 /**
- * Reconcile missing voting comments for phase:voting issues.
+ * Reconcile missing voting comments for hivemoot:voting issues.
  *
- * Iterates all open issues with the phase:voting label and calls
+ * Iterates all open issues with the hivemoot:voting label and calls
  * governance.postVotingComment() on each. Since postVotingComment is
  * idempotent (skips when a voting comment already exists), this is safe
  * to call on every cron run. Errors on individual issues are logged
@@ -560,25 +560,31 @@ export async function reconcileMissingVotingComments(
   governance: GovernanceService,
 ): Promise<number> {
   let reconciledCount = 0;
-  const iterator = octokit.paginate.iterator(
-    octokit.rest.issues.listForRepo,
-    { owner, repo: repoName, state: "open", labels: LABELS.VOTING, per_page: 100 },
-  );
+  const seen = new Set<number>();
 
-  for await (const { data: page } of iterator) {
-    for (const issue of page as Issue[]) {
-      if ('pull_request' in issue) continue;
-      const ref: IssueRef = { owner, repo: repoName, issueNumber: issue.number };
-      try {
-        const result = await governance.postVotingComment(ref);
-        if (result === "posted") {
-          reconciledCount++;
-          logger.info(`[${owner}/${repoName}] Reconciled voting comment for #${issue.number}`);
+  for (const alias of getLabelQueryAliases(LABELS.VOTING)) {
+    const iterator = octokit.paginate.iterator(
+      octokit.rest.issues.listForRepo,
+      { owner, repo: repoName, state: "open", labels: alias, per_page: 100 },
+    );
+
+    for await (const { data: page } of iterator) {
+      for (const issue of page as Issue[]) {
+        if ('pull_request' in issue) continue;
+        if (seen.has(issue.number)) continue;
+        seen.add(issue.number);
+        const ref: IssueRef = { owner, repo: repoName, issueNumber: issue.number };
+        try {
+          const result = await governance.postVotingComment(ref);
+          if (result === "posted") {
+            reconciledCount++;
+            logger.info(`[${owner}/${repoName}] Reconciled voting comment for #${issue.number}`);
+          }
+        } catch (error) {
+          logger.warn(
+            `[${owner}/${repoName}] Failed to reconcile #${issue.number}: ${(error as Error).message}`,
+          );
         }
-      } catch (error) {
-        logger.warn(
-          `[${owner}/${repoName}] Failed to reconcile #${issue.number}: ${(error as Error).message}`,
-        );
       }
     }
   }
@@ -604,8 +610,9 @@ interface PhaseConfig {
 
 /**
  * Paginate through issues with a given label and process each through
- * the phase transition pipeline. Skips pull requests (the issues API
- * returns both issues and PRs).
+ * the phase transition pipeline. Queries both canonical and legacy label
+ * names to catch entities carrying either old or new labels.
+ * Skips pull requests (the issues API returns both issues and PRs).
  */
 async function processPhaseIssues(
   octokit: InstanceType<typeof Octokit>,
@@ -616,34 +623,40 @@ async function processPhaseIssues(
   phase: PhaseConfig,
   onAccessIssue: (ref: IssueRef, status: number | undefined, reason: AccessIssueReason) => void
 ): Promise<void> {
-  const iterator = octokit.paginate.iterator(
-    octokit.rest.issues.listForRepo,
-    {
-      owner,
-      repo: repoName,
-      state: "open",
-      labels: phase.label,
-      per_page: 100,
-    }
-  );
+  const seen = new Set<number>();
 
-  for await (const { data: page } of iterator) {
-    for (const issue of page as Issue[]) {
-      if ('pull_request' in issue) {
-        continue;
+  for (const alias of getLabelQueryAliases(phase.label)) {
+    const iterator = octokit.paginate.iterator(
+      octokit.rest.issues.listForRepo,
+      {
+        owner,
+        repo: repoName,
+        state: "open",
+        labels: alias,
+        per_page: 100,
       }
-      const ref: IssueRef = { owner, repo: repoName, issueNumber: issue.number };
-      await processIssuePhase(
-        issues,
-        governance,
-        ref,
-        phase.label,
-        phase.durationMs,
-        phase.phaseName,
-        () => phase.transition(governance, ref),
-        onAccessIssue,
-        phase.earlyCheck
-      );
+    );
+
+    for await (const { data: page } of iterator) {
+      for (const issue of page as Issue[]) {
+        if ('pull_request' in issue) {
+          continue;
+        }
+        if (seen.has(issue.number)) continue;
+        seen.add(issue.number);
+        const ref: IssueRef = { owner, repo: repoName, issueNumber: issue.number };
+        await processIssuePhase(
+          issues,
+          governance,
+          ref,
+          phase.label,
+          phase.durationMs,
+          phase.phaseName,
+          () => phase.transition(governance, ref),
+          onAccessIssue,
+          phase.earlyCheck
+        );
+      }
     }
   }
 }
@@ -724,7 +737,7 @@ export async function processRepository(
     ) => async (_gov: GovernanceService, ref: IssueRef): Promise<void> => {
       const outcome = await endFn(ref, endOptions);
       trackOutcome(outcome, ref.issueNumber);
-      if (outcome === "phase:ready-to-implement") {
+      if (outcome === "ready-to-implement") {
         await notifyPendingPRs(octokit, appId, owner, repoName, ref.issueNumber, prIntakeConfig);
       }
     };
@@ -850,7 +863,7 @@ async function main(): Promise<void> {
         logger.warn(
           `${allSkippedIssues.length} issue(s) skipped due to missing voting comments: ${skippedList}`
         );
-        logger.warn("Human intervention requested for these issues (see needs:human label)");
+        logger.warn("Human intervention requested for these issues (see hivemoot:needs-human label)");
         core.warning(`${allSkippedIssues.length} issue(s) require human intervention`);
       }
 

@@ -9,11 +9,11 @@
 
 ## When to Open a PR
 
-**Do not start implementation work until the target issue has the `phase:ready-to-implement` label.** Issues go through a governance lifecycle (discussion → voting → outcome) before implementation begins. Opening a PR against an issue that hasn't reached `phase:ready-to-implement` will trigger a bot warning, and the PR will not be tracked on the implementation leaderboard.
+**Do not start implementation work until the target issue has the `hivemoot:ready-to-implement` label.** Issues go through a governance lifecycle (discussion → voting → outcome) before implementation begins. Opening a PR against an issue that hasn't reached `hivemoot:ready-to-implement` will trigger a bot warning, and the PR will not be tracked on the implementation leaderboard.
 
 If you want to contribute:
 
-1. Find an issue labeled `phase:ready-to-implement`.
+1. Find an issue labeled `hivemoot:ready-to-implement`.
 2. Check if there are already open PRs for that issue. Prefer reviewing and improving an existing PR over opening a new competing one, unless it is stale or no longer relevant.
 3. Confirm the implementation slot limit hasn't been reached (default: 3 competing PRs per issue).
 4. Include a closing keyword in the PR body: `Fixes #N`, `Closes #N`, or `Resolves #N`.

@@ -15,7 +15,7 @@
  * config → labels → approvals (1 call) → PR fetch (headSha + mergeable) → mergeable → CI (2 calls)
  */
 
-import { LABELS } from "../config.js";
+import { LABELS, isLabelMatch } from "../config.js";
 import type { PRRef } from "./types.js";
 import type { PROperations } from "./pr-operations.js";
 import type { MergeReadyConfig } from "./repo-config.js";
@@ -67,8 +67,8 @@ export async function evaluateMergeReadiness(
 
   // 2. Check implementation label (use pre-fetched labels or fetch)
   const labels = params.currentLabels ?? await prs.getLabels(ref);
-  const hasImplementation = labels.includes(LABELS.IMPLEMENTATION);
-  const hasMergeReady = labels.includes(LABELS.MERGE_READY);
+  const hasImplementation = labels.some(l => isLabelMatch(l, LABELS.IMPLEMENTATION));
+  const hasMergeReady = labels.some(l => isLabelMatch(l, LABELS.MERGE_READY));
 
   if (!hasImplementation) {
     if (hasMergeReady) {

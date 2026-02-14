@@ -23,6 +23,7 @@ describe("createRepositoryLabelService", () => {
         issues: {
           listLabelsForRepo: vi.fn(),
           createLabel: vi.fn(),
+          updateLabel: vi.fn(),
         },
       },
       paginate: {
@@ -49,6 +50,7 @@ describe("RepositoryLabelService", () => {
         issues: {
           listLabelsForRepo: vi.fn(),
           createLabel: vi.fn().mockResolvedValue({}),
+          updateLabel: vi.fn().mockResolvedValue({}),
         },
       },
       paginate: {
@@ -66,6 +68,7 @@ describe("RepositoryLabelService", () => {
 
     expect(result).toEqual({
       created: REQUIRED_REPOSITORY_LABELS.length,
+      renamed: 0,
       skipped: 0,
     });
 
@@ -105,6 +108,7 @@ describe("RepositoryLabelService", () => {
     const result = await service.ensureRequiredLabels("hivemoot", "colony");
     expect(result).toEqual({
       created: REQUIRED_REPOSITORY_LABELS.length - 2,
+      renamed: 0,
       skipped: 2,
     });
 
@@ -129,6 +133,7 @@ describe("RepositoryLabelService", () => {
     const result = await service.ensureRequiredLabels("hivemoot", "colony");
     expect(result).toEqual({
       created: REQUIRED_REPOSITORY_LABELS.length - 1,
+      renamed: 0,
       skipped: 1,
     });
 
@@ -155,6 +160,7 @@ describe("RepositoryLabelService", () => {
     const result = await service.ensureRequiredLabels("hivemoot", "colony");
     expect(result).toEqual({
       created: REQUIRED_REPOSITORY_LABELS.length - 1,
+      renamed: 0,
       skipped: 1,
     });
   });
@@ -168,5 +174,52 @@ describe("RepositoryLabelService", () => {
     vi.mocked(client.rest.issues.createLabel).mockRejectedValue(serverError);
 
     await expect(service.ensureRequiredLabels("hivemoot", "colony")).rejects.toThrow("Server Error");
+  });
+
+  it("should rename legacy label instead of creating duplicate", async () => {
+    // Repo has "phase:voting" (legacy) but not "hivemoot:voting" (canonical)
+    vi.mocked(client.paginate.iterator).mockReturnValue(
+      buildIterator([
+        [{ name: "phase:voting" }],
+      ])
+    );
+
+    const votingLabel = REQUIRED_REPOSITORY_LABELS.find(
+      (l) => l.name === LABELS.VOTING
+    )!;
+    const result = await service.ensureRequiredLabels("hivemoot", "colony", [votingLabel]);
+
+    expect(result).toEqual({ created: 0, renamed: 1, skipped: 0 });
+
+    expect(client.rest.issues.updateLabel).toHaveBeenCalledWith({
+      owner: "hivemoot",
+      repo: "colony",
+      name: "phase:voting",
+      new_name: LABELS.VOTING,
+      color: votingLabel.color,
+      description: votingLabel.description,
+    });
+    expect(client.rest.issues.createLabel).not.toHaveBeenCalled();
+  });
+
+  it("should skip when canonical label already exists even if legacy also exists", async () => {
+    // Both old and new names exist — skip (canonical takes precedence)
+    vi.mocked(client.paginate.iterator).mockReturnValue(
+      buildIterator([
+        [
+          { name: LABELS.VOTING },
+          { name: "phase:voting" },
+        ],
+      ])
+    );
+
+    const votingLabel = REQUIRED_REPOSITORY_LABELS.find(
+      (l) => l.name === LABELS.VOTING
+    )!;
+    const result = await service.ensureRequiredLabels("hivemoot", "colony", [votingLabel]);
+
+    expect(result).toEqual({ created: 0, renamed: 0, skipped: 1 });
+    expect(client.rest.issues.updateLabel).not.toHaveBeenCalled();
+    expect(client.rest.issues.createLabel).not.toHaveBeenCalled();
   });
 });

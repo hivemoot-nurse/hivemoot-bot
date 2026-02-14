@@ -256,13 +256,13 @@ describe("IssueOperations", () => {
 
   describe("removeLabel", () => {
     it("should call GitHub API with correct parameters", async () => {
-      await issueOps.removeLabel(testRef, "phase:discussion");
+      await issueOps.removeLabel(testRef, "hivemoot:discussion");
 
       expect(mockClient.rest.issues.removeLabel).toHaveBeenCalledWith({
         owner: "test-org",
         repo: "test-repo",
         issue_number: 42,
-        name: "phase:discussion",
+        name: "hivemoot:discussion",
       });
     });
 
@@ -281,6 +281,42 @@ describe("IssueOperations", () => {
       vi.mocked(mockClient.rest.issues.removeLabel).mockRejectedValue(error);
 
       await expect(issueOps.removeLabel(testRef, "label")).rejects.toThrow("Server Error");
+    });
+
+    it("should fall back to legacy alias when canonical returns 404", async () => {
+      const notFound = new Error("Not Found") as Error & { status: number };
+      notFound.status = 404;
+
+      // First call (canonical "hivemoot:voting") → 404
+      // Second call (legacy "phase:voting") → success
+      vi.mocked(mockClient.rest.issues.removeLabel)
+        .mockRejectedValueOnce(notFound)
+        .mockResolvedValueOnce({});
+
+      await issueOps.removeLabel(testRef, "hivemoot:voting");
+
+      expect(mockClient.rest.issues.removeLabel).toHaveBeenCalledTimes(2);
+      expect(mockClient.rest.issues.removeLabel).toHaveBeenNthCalledWith(1, {
+        owner: "test-org",
+        repo: "test-repo",
+        issue_number: 42,
+        name: "hivemoot:voting",
+      });
+      expect(mockClient.rest.issues.removeLabel).toHaveBeenNthCalledWith(2, {
+        owner: "test-org",
+        repo: "test-repo",
+        issue_number: 42,
+        name: "phase:voting",
+      });
+    });
+
+    it("should silently ignore when neither canonical nor legacy labels exist", async () => {
+      const notFound = new Error("Not Found") as Error & { status: number };
+      notFound.status = 404;
+
+      vi.mocked(mockClient.rest.issues.removeLabel).mockRejectedValue(notFound);
+
+      await expect(issueOps.removeLabel(testRef, "hivemoot:voting")).resolves.toBeUndefined();
     });
   });
 
@@ -1129,14 +1165,34 @@ describe("IssueOperations", () => {
           yield {
             data: [
               { event: "opened", created_at: "2024-01-15T10:00:00Z" },
-              { event: "labeled", label: { name: "phase:discussion" }, created_at: labeledDate },
+              { event: "labeled", label: { name: "hivemoot:discussion" }, created_at: labeledDate },
               { event: "commented", created_at: "2024-01-15T11:00:00Z" },
             ],
           };
         },
       });
 
-      const result = await issueOps.getLabelAddedTime(testRef, "phase:discussion");
+      const result = await issueOps.getLabelAddedTime(testRef, "hivemoot:discussion");
+
+      expect(result).toEqual(new Date(labeledDate));
+    });
+
+    it("should match legacy label name when searching for canonical name", async () => {
+      const labeledDate = "2024-01-15T10:30:00Z";
+
+      mockClient.paginate.iterator = vi.fn().mockReturnValue({
+        async *[Symbol.asyncIterator]() {
+          yield {
+            data: [
+              { event: "opened", created_at: "2024-01-15T10:00:00Z" },
+              { event: "labeled", label: { name: "phase:discussion" }, created_at: labeledDate },
+            ],
+          };
+        },
+      });
+
+      // Search by canonical name, but timeline has legacy name
+      const result = await issueOps.getLabelAddedTime(testRef, "hivemoot:discussion");
 
       expect(result).toEqual(new Date(labeledDate));
     });
@@ -1153,7 +1209,7 @@ describe("IssueOperations", () => {
         },
       });
 
-      const result = await issueOps.getLabelAddedTime(testRef, "phase:discussion");
+      const result = await issueOps.getLabelAddedTime(testRef, "hivemoot:discussion");
 
       expect(result).toBeNull();
     });
@@ -1162,7 +1218,7 @@ describe("IssueOperations", () => {
   describe("transition", () => {
     it("should add label and comment", async () => {
       await issueOps.transition(testRef, {
-        addLabel: "phase:voting",
+        addLabel: "hivemoot:voting",
         comment: "Voting has started!",
       });
 
@@ -1172,19 +1228,19 @@ describe("IssueOperations", () => {
 
     it("should remove label when specified", async () => {
       await issueOps.transition(testRef, {
-        removeLabel: "phase:discussion",
-        addLabel: "phase:voting",
+        removeLabel: "hivemoot:discussion",
+        addLabel: "hivemoot:voting",
         comment: "Moving to voting",
       });
 
       expect(mockClient.rest.issues.removeLabel).toHaveBeenCalledWith(
-        expect.objectContaining({ name: "phase:discussion" })
+        expect.objectContaining({ name: "hivemoot:discussion" })
       );
     });
 
     it("should close issue when specified", async () => {
       await issueOps.transition(testRef, {
-        addLabel: "rejected",
+        addLabel: "hivemoot:rejected",
         comment: "Rejected",
         close: true,
         closeReason: "not_planned",
@@ -1197,7 +1253,7 @@ describe("IssueOperations", () => {
 
     it("should lock issue when specified", async () => {
       await issueOps.transition(testRef, {
-        addLabel: "phase:ready-to-implement",
+        addLabel: "hivemoot:ready-to-implement",
         comment: "Ready to implement",
         lock: true,
         lockReason: "resolved",
@@ -1256,7 +1312,7 @@ describe("IssueOperations", () => {
       });
 
       await issueOps.transition(testRef, {
-        addLabel: "rejected",
+        addLabel: "hivemoot:rejected",
         comment: "Rejected",
         lock: true,
       });
@@ -1272,8 +1328,8 @@ describe("IssueOperations", () => {
 
       await expect(
         issueOps.transition(testRef, {
-          removeLabel: "phase:discussion",
-          addLabel: "phase:voting",
+          removeLabel: "hivemoot:discussion",
+          addLabel: "hivemoot:voting",
           comment: "Moving to voting",
         }),
       ).rejects.toThrow("API Error");
@@ -1315,8 +1371,8 @@ describe("IssueOperations", () => {
       });
 
       await issueOps.transition(testRef, {
-        removeLabel: "phase:voting",
-        addLabel: "phase:discussion",
+        removeLabel: "hivemoot:voting",
+        addLabel: "hivemoot:discussion",
         comment: "Needs more discussion",
         unlock: true,
       });
