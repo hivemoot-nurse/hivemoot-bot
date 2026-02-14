@@ -23,6 +23,7 @@ import {
   hasPaginateIterator,
   ISSUE_CLIENT_CHECKS,
 } from "./client-validation.js";
+import { LEGACY_LABEL_MAP } from "../config.js";
 import { logger } from "./logger.js";
 
 // Re-export IssueComment for backwards compatibility
@@ -211,7 +212,11 @@ export class IssueOperations {
   }
 
   /**
-   * Remove a label from an issue
+   * Remove a label from an issue.
+   *
+   * On 404 (canonical name not found), falls back to removing legacy aliases
+   * that map to the same canonical label. This prevents dual label accumulation
+   * during the transition period where issues may carry old label names.
    */
   async removeLabel(ref: IssueRef, label: string): Promise<void> {
     try {
@@ -222,9 +227,24 @@ export class IssueOperations {
         name: label,
       });
     } catch (error) {
-      // Label might not exist - ignore 404 errors
       if ((error as { status?: number }).status !== 404) {
         throw error;
+      }
+      // Canonical not found — try legacy aliases
+      for (const [legacy, canonical] of Object.entries(LEGACY_LABEL_MAP)) {
+        if (canonical === label) {
+          try {
+            await this.client.rest.issues.removeLabel({
+              owner: ref.owner,
+              repo: ref.repo,
+              issue_number: ref.issueNumber,
+              name: legacy,
+            });
+            return;
+          } catch (e) {
+            if ((e as { status?: number }).status !== 404) throw e;
+          }
+        }
       }
     }
   }

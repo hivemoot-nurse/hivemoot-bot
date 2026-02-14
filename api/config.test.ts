@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { SIGNATURES, parseMetadata, NOTIFICATION_TYPES, type NotificationMetadata } from "./lib/bot-comments.js";
-import { isLabelMatch, LEGACY_LABEL_MAP, LABELS } from "./config.js";
+import { isLabelMatch, getLabelQueryAliases, LEGACY_LABEL_MAP, LABELS } from "./config.js";
 
 /**
  * Tests for config.ts
@@ -163,7 +163,7 @@ describe("config", () => {
       expect(isLabelMatch("phase:discussion", LABELS.DISCUSSION)).toBe(true);
       expect(isLabelMatch("phase:voting", LABELS.VOTING)).toBe(true);
       expect(isLabelMatch("phase:extended-voting", LABELS.EXTENDED_VOTING)).toBe(true);
-      expect(isLabelMatch("phase:ready-to-implement", LABELS.READY_TO_IMPLEMENT)).toBe(true);
+      expect(isLabelMatch("ready-to-implement", LABELS.READY_TO_IMPLEMENT)).toBe(true);
       expect(isLabelMatch("rejected", LABELS.REJECTED)).toBe(true);
       expect(isLabelMatch("inconclusive", LABELS.INCONCLUSIVE)).toBe(true);
       expect(isLabelMatch("implementation", LABELS.IMPLEMENTATION)).toBe(true);
@@ -190,6 +190,39 @@ describe("config", () => {
     });
   });
 
+  describe("getLabelQueryAliases", () => {
+    it("should return canonical label as the first element", () => {
+      const aliases = getLabelQueryAliases(LABELS.DISCUSSION);
+      expect(aliases[0]).toBe(LABELS.DISCUSSION);
+    });
+
+    it("should include all legacy aliases for a canonical label", () => {
+      const aliases = getLabelQueryAliases(LABELS.DISCUSSION);
+      expect(aliases).toContain("phase:discussion");
+      expect(aliases).toHaveLength(2); // canonical + one legacy
+    });
+
+    it("should include all legacy aliases for labels with multiple mappings", () => {
+      // READY_TO_IMPLEMENT has one legacy alias: "ready-to-implement"
+      const aliases = getLabelQueryAliases(LABELS.READY_TO_IMPLEMENT);
+      expect(aliases).toContain(LABELS.READY_TO_IMPLEMENT);
+      expect(aliases).toContain("ready-to-implement");
+    });
+
+    it("should return just the canonical name when no legacy aliases exist", () => {
+      const aliases = getLabelQueryAliases("some-unknown-label");
+      expect(aliases).toEqual(["some-unknown-label"]);
+    });
+
+    it("should return aliases for every canonical label", () => {
+      for (const label of Object.values(LABELS)) {
+        const aliases = getLabelQueryAliases(label);
+        expect(aliases[0]).toBe(label);
+        expect(aliases.length).toBeGreaterThanOrEqual(1);
+      }
+    });
+  });
+
   describe("LEGACY_LABEL_MAP", () => {
     it("should map every legacy name to a valid LABELS value", () => {
       const validLabelValues = new Set(Object.values(LABELS));
@@ -207,7 +240,7 @@ describe("config", () => {
         "phase:discussion",
         "phase:voting",
         "phase:extended-voting",
-        "phase:ready-to-implement",
+        "ready-to-implement",
         "rejected",
         "inconclusive",
         "implementation",
@@ -226,7 +259,7 @@ describe("config", () => {
       expect(LEGACY_LABEL_MAP["phase:discussion"]).toBe(LABELS.DISCUSSION);
       expect(LEGACY_LABEL_MAP["phase:voting"]).toBe(LABELS.VOTING);
       expect(LEGACY_LABEL_MAP["phase:extended-voting"]).toBe(LABELS.EXTENDED_VOTING);
-      expect(LEGACY_LABEL_MAP["phase:ready-to-implement"]).toBe(LABELS.READY_TO_IMPLEMENT);
+      expect(LEGACY_LABEL_MAP["ready-to-implement"]).toBe(LABELS.READY_TO_IMPLEMENT);
       expect(LEGACY_LABEL_MAP["rejected"]).toBe(LABELS.REJECTED);
       expect(LEGACY_LABEL_MAP["inconclusive"]).toBe(LABELS.INCONCLUSIVE);
       expect(LEGACY_LABEL_MAP["implementation"]).toBe(LABELS.IMPLEMENTATION);

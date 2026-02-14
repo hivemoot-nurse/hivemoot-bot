@@ -394,13 +394,13 @@ describe("GovernanceService", () => {
       return { votes, voters: names, participants: names };
     }
 
-    it("should mark phase:ready-to-implement when thumbsUp > thumbsDown", async () => {
+    it("should mark ready-to-implement when thumbsUp > thumbsDown", async () => {
       const votes: VoteCounts = { thumbsUp: 5, thumbsDown: 2, confused: 1, eyes: 0 };
       vi.mocked(mockIssues.getValidatedVoteCounts).mockResolvedValue(validatedFrom(votes));
 
       const outcome = await governance.endVoting(testRef);
 
-      expect(outcome).toBe("phase:ready-to-implement");
+      expect(outcome).toBe("ready-to-implement");
       expect(mockIssues.findVotingCommentId).toHaveBeenCalledWith(testRef);
       expect(mockIssues.getValidatedVoteCounts).toHaveBeenCalledWith(testRef, 12345);
       expect(mockIssues.transition).toHaveBeenCalledWith(testRef, {
@@ -517,7 +517,7 @@ describe("GovernanceService", () => {
       const outcome = await governance.endVoting(testRef);
 
       // Should proceed with normal outcome (thumbsUp > thumbsDown)
-      expect(outcome).toBe("phase:ready-to-implement");
+      expect(outcome).toBe("ready-to-implement");
     });
 
     it("should return skipped and self-heal when voting comment not found", async () => {
@@ -659,7 +659,7 @@ describe("GovernanceService", () => {
         },
       });
 
-      expect(outcome).toBe("phase:ready-to-implement");
+      expect(outcome).toBe("ready-to-implement");
     });
 
     it("should count thumbsDown reactions as participation for requiredVoters", async () => {
@@ -689,7 +689,7 @@ describe("GovernanceService", () => {
       });
 
       // agent-a participated, so requiredVoters passes. 1 valid voter >= minVoters 1.
-      expect(outcome).toBe("phase:ready-to-implement");
+      expect(outcome).toBe("ready-to-implement");
     });
 
     it("should use pre-fetched validatedVotes and skip API call", async () => {
@@ -719,13 +719,13 @@ describe("GovernanceService", () => {
 
       const outcome = await governance.resolveInconclusive(testRef);
 
-      expect(outcome).toBe("phase:ready-to-implement");
+      expect(outcome).toBe("ready-to-implement");
       expect(mockIssues.findVotingCommentId).toHaveBeenCalledWith(testRef);
       expect(mockIssues.getValidatedVoteCounts).toHaveBeenCalledWith(testRef, 12345);
       expect(mockIssues.transition).toHaveBeenCalledWith(testRef, {
         removeLabel: LABELS.EXTENDED_VOTING,
         addLabel: LABELS.READY_TO_IMPLEMENT,
-        comment: MESSAGES.votingEndInconclusiveResolved(votes, "phase:ready-to-implement"),
+        comment: MESSAGES.votingEndInconclusiveResolved(votes, "ready-to-implement"),
         close: false,
         lock: false,
       });
@@ -891,7 +891,7 @@ describe("GovernanceService", () => {
         },
       });
 
-      expect(outcome).toBe("phase:ready-to-implement");
+      expect(outcome).toBe("ready-to-implement");
     });
 
     it("should use pre-fetched validatedVotes and skip API call", async () => {
@@ -918,7 +918,7 @@ describe("GovernanceService", () => {
         },
       });
 
-      expect(outcome).toBe("phase:ready-to-implement");
+      expect(outcome).toBe("ready-to-implement");
     });
 
     it("should force inconclusive when no required voter participated (minCount: 1)", async () => {
@@ -949,7 +949,7 @@ describe("GovernanceService", () => {
         },
       });
 
-      expect(outcome).toBe("phase:ready-to-implement");
+      expect(outcome).toBe("ready-to-implement");
     });
   });
 

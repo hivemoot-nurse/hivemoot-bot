@@ -66,6 +66,7 @@ interface LabelBootstrapSummary {
   reposProcessed: number;
   reposFailed: number;
   labelsCreated: number;
+  labelsRenamed: number;
   labelsSkipped: number;
 }
 
@@ -187,6 +188,7 @@ async function ensureLabelsForRepositories(
     reposProcessed: targetRepositories.length,
     reposFailed: 0,
     labelsCreated: 0,
+    labelsRenamed: 0,
     labelsSkipped: 0,
   };
 
@@ -195,9 +197,10 @@ async function ensureLabelsForRepositories(
     try {
       const result = await labelService.ensureRequiredLabels(owner, repo);
       summary.labelsCreated += result.created;
+      summary.labelsRenamed += result.renamed;
       summary.labelsSkipped += result.skipped;
       context.log.info(
-        `[${eventName}] Ensured labels in ${fullName}: created=${result.created}, skipped=${result.skipped}`
+        `[${eventName}] Ensured labels in ${fullName}: created=${result.created}, renamed=${result.renamed}, skipped=${result.skipped}`
       );
     } catch (error) {
       summary.reposFailed += 1;
@@ -207,7 +210,7 @@ async function ensureLabelsForRepositories(
   }
 
   context.log.info(
-    `[${eventName}] Label bootstrap summary: reposProcessed=${summary.reposProcessed}, reposFailed=${summary.reposFailed}, labelsCreated=${summary.labelsCreated}, labelsSkipped=${summary.labelsSkipped}`
+    `[${eventName}] Label bootstrap summary: reposProcessed=${summary.reposProcessed}, reposFailed=${summary.reposFailed}, labelsCreated=${summary.labelsCreated}, labelsRenamed=${summary.labelsRenamed}, labelsSkipped=${summary.labelsSkipped}`
   );
 
   if (errors.length > 0) {

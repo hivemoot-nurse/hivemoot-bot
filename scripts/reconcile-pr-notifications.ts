@@ -16,6 +16,7 @@ import { Octokit } from "octokit";
 import {
   LABELS,
   PR_MESSAGES,
+  getLabelQueryAliases,
 } from "../api/config.js";
 import {
   createPROperations,
@@ -195,34 +196,39 @@ export async function processRepository(
     const repoConfig = await loadRepositoryConfig(octokit, owner, repoName);
     const { maxPRsPerIssue, trustedReviewers, intake } = repoConfig.governance.pr;
 
-    // Paginate through all open issues with hivemoot:ready-to-implement label
+    // Paginate through all open issues with ready-to-implement label (canonical + legacy)
     const failedIssues: number[] = [];
-    const readyIterator = octokit.paginate.iterator(
-      octokit.rest.issues.listForRepo,
-      {
-        owner,
-        repo: repoName,
-        state: "open",
-        labels: LABELS.READY_TO_IMPLEMENT,
-        per_page: 100,
-      }
-    );
+    const seenIssues = new Set<number>();
 
-    for await (const { data: page } of readyIterator) {
-      // Filter out PRs (the issues API also returns PRs with matching labels)
-      const filteredIssues = (page as Array<{ number: number; pull_request?: unknown }>).filter(
-        (item) => !item.pull_request
+    for (const alias of getLabelQueryAliases(LABELS.READY_TO_IMPLEMENT)) {
+      const readyIterator = octokit.paginate.iterator(
+        octokit.rest.issues.listForRepo,
+        {
+          owner,
+          repo: repoName,
+          state: "open",
+          labels: alias,
+          per_page: 100,
+        }
       );
 
-      for (const issue of filteredIssues) {
-        try {
-          const result = await reconcileIssue(octokit, prs, issues, owner, repoName, issue.number, maxPRsPerIssue, trustedReviewers, intake);
-          if (result.notified > 0) {
-            logger.info(`Issue #${issue.number}: notified ${result.notified} PR(s), skipped ${result.skipped}`);
+      for await (const { data: page } of readyIterator) {
+        const filteredIssues = (page as Array<{ number: number; pull_request?: unknown }>).filter(
+          (item) => !item.pull_request
+        );
+
+        for (const issue of filteredIssues) {
+          if (seenIssues.has(issue.number)) continue;
+          seenIssues.add(issue.number);
+          try {
+            const result = await reconcileIssue(octokit, prs, issues, owner, repoName, issue.number, maxPRsPerIssue, trustedReviewers, intake);
+            if (result.notified > 0) {
+              logger.info(`Issue #${issue.number}: notified ${result.notified} PR(s), skipped ${result.skipped}`);
+            }
+          } catch (error) {
+            failedIssues.push(issue.number);
+            logger.error(`Failed to reconcile issue #${issue.number}`, error as Error);
           }
-        } catch (error) {
-          failedIssues.push(issue.number);
-          logger.error(`Failed to reconcile issue #${issue.number}`, error as Error);
         }
       }
     }

@@ -876,7 +876,7 @@ describe("close-discussions script", () => {
 
     it("should call the provided resolution function when exit conditions are met", async () => {
       const deps = createMockDeps();
-      const resolveFn = vi.fn().mockResolvedValue("phase:ready-to-implement" as VotingOutcome);
+      const resolveFn = vi.fn().mockResolvedValue("ready-to-implement" as VotingOutcome);
 
       const check = makeEarlyDecisionCheck(resolveFn, deps);
       const result = await check!(testRef, 20 * 60 * 1000); // 20 minutes
@@ -894,18 +894,18 @@ describe("close-discussions script", () => {
     it("should call trackOutcome with the resolution result", async () => {
       const trackOutcome = vi.fn();
       const deps = createMockDeps({ trackOutcome });
-      const resolveFn = vi.fn().mockResolvedValue("phase:ready-to-implement" as VotingOutcome);
+      const resolveFn = vi.fn().mockResolvedValue("ready-to-implement" as VotingOutcome);
 
       const check = makeEarlyDecisionCheck(resolveFn, deps);
       await check!(testRef, 20 * 60 * 1000);
 
-      expect(trackOutcome).toHaveBeenCalledWith("phase:ready-to-implement", 42);
+      expect(trackOutcome).toHaveBeenCalledWith("ready-to-implement", 42);
     });
 
     it("should call notifyPRs when outcome is ready-to-implement", async () => {
       const notifyPRs = vi.fn().mockResolvedValue(undefined);
       const deps = createMockDeps({ notifyPRs });
-      const resolveFn = vi.fn().mockResolvedValue("phase:ready-to-implement" as VotingOutcome);
+      const resolveFn = vi.fn().mockResolvedValue("ready-to-implement" as VotingOutcome);
 
       const check = makeEarlyDecisionCheck(resolveFn, deps);
       await check!(testRef, 20 * 60 * 1000);
@@ -926,8 +926,8 @@ describe("close-discussions script", () => {
 
     it("should use the correct resolution function for each phase", async () => {
       // This test verifies the key fix: different phases can use different resolution functions
-      const endVotingFn = vi.fn().mockResolvedValue("phase:ready-to-implement" as VotingOutcome);
-      const resolveInconclusiveFn = vi.fn().mockResolvedValue("phase:ready-to-implement" as VotingOutcome);
+      const endVotingFn = vi.fn().mockResolvedValue("ready-to-implement" as VotingOutcome);
+      const resolveInconclusiveFn = vi.fn().mockResolvedValue("ready-to-implement" as VotingOutcome);
 
       const votingDeps = createMockDeps();
       const inconclusiveDeps = createMockDeps();

@@ -324,7 +324,7 @@ export class GovernanceService {
       Exclude<VotingOutcome, "skipped">,
       OutcomeTransitionConfig
     > = {
-      "phase:ready-to-implement": {
+      "ready-to-implement": {
         label: LABELS.READY_TO_IMPLEMENT,
         message: earlyPrefix + MESSAGES.votingEndReadyToImplement(validated.votes),
         close: false,
@@ -423,11 +423,11 @@ export class GovernanceService {
       Exclude<VotingOutcome, "skipped">,
       OutcomeTransitionConfig
     > = {
-      "phase:ready-to-implement": {
+      "ready-to-implement": {
         label: LABELS.READY_TO_IMPLEMENT,
         message: MESSAGES.votingEndInconclusiveResolved(
           validated.votes,
-          "phase:ready-to-implement",
+          "ready-to-implement",
         ),
         close: false,
         // Keep unlocked so the bot can post/update leaderboard comments on the issue.
@@ -644,7 +644,7 @@ export class GovernanceService {
       return "needs-more-discussion";
     }
     if (votes.thumbsUp > votes.thumbsDown) {
-      return "phase:ready-to-implement";
+      return "ready-to-implement";
     }
     if (votes.thumbsDown > votes.thumbsUp) {
       return "rejected";

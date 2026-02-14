@@ -172,7 +172,7 @@ Time for hivemoot to decide.
 
 Voting closes in ~24 hours.${SIGNATURE}`,
 
-  // Posted when voting ends with a phase:ready-to-implement outcome
+  // Posted when voting ends with a ready-to-implement outcome
   votingEndReadyToImplement: (votes: { thumbsUp: number; thumbsDown: number; confused: number; eyes: number }) => `# 🐝 Ready to Implement ✅
 
 ${formatVotes(votes)}
@@ -243,10 +243,10 @@ ${params.final
   // Posted when extended voting resolves with a clear winner
   votingEndInconclusiveResolved: (
     votes: { thumbsUp: number; thumbsDown: number; confused: number; eyes: number },
-    outcome: "phase:ready-to-implement" | "rejected" | "needs-human-input"
+    outcome: "ready-to-implement" | "rejected" | "needs-human-input"
   ) => {
     const config = {
-      "phase:ready-to-implement": {
+      "ready-to-implement": {
         status: "Ready to Implement",
         emoji: "✅",
         explanation: "Patience paid off. Ready for implementation.",
@@ -259,7 +259,7 @@ ${params.final
       "needs-human-input": {
         status: "Needs Human Input",
         emoji: "👀",
-        explanation: "The hive has spoken — this issue needs a human to weigh in. Remove the `needs:human` label when you've addressed the concern.",
+        explanation: "The hive has spoken — this issue needs a human to weigh in. Remove the `hivemoot:needs-human` label when you've addressed the concern.",
       },
     }[outcome];
     return `# 🐝 ${config.status} ${config.emoji}
@@ -326,7 +326,7 @@ export const LEGACY_LABEL_MAP: Record<string, string> = {
   "phase:discussion": LABELS.DISCUSSION,
   "phase:voting": LABELS.VOTING,
   "phase:extended-voting": LABELS.EXTENDED_VOTING,
-  "phase:ready-to-implement": LABELS.READY_TO_IMPLEMENT,
+  "ready-to-implement": LABELS.READY_TO_IMPLEMENT,
   "rejected": LABELS.REJECTED,
   "inconclusive": LABELS.INCONCLUSIVE,
   "implementation": LABELS.IMPLEMENTATION,
@@ -343,6 +343,24 @@ export const LEGACY_LABEL_MAP: Record<string, string> = {
 export function isLabelMatch(name: string | undefined, label: string): boolean {
   if (!name) return false;
   return name === label || LEGACY_LABEL_MAP[name] === label;
+}
+
+/**
+ * Return all label names that refer to the same canonical label.
+ * Result: [canonical, ...legacyAliases].
+ *
+ * Use this when building GitHub API queries (e.g., `labels` filter on
+ * `listForRepo`) which only match exact names. Querying each alias
+ * ensures entities carrying either old or new labels are found.
+ */
+export function getLabelQueryAliases(label: string): string[] {
+  const aliases = [label];
+  for (const [legacy, canonical] of Object.entries(LEGACY_LABEL_MAP)) {
+    if (canonical === label) {
+      aliases.push(legacy);
+    }
+  }
+  return aliases;
 }
 
 export interface RepositoryLabelDefinition {

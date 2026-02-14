@@ -282,6 +282,42 @@ describe("IssueOperations", () => {
 
       await expect(issueOps.removeLabel(testRef, "label")).rejects.toThrow("Server Error");
     });
+
+    it("should fall back to legacy alias when canonical returns 404", async () => {
+      const notFound = new Error("Not Found") as Error & { status: number };
+      notFound.status = 404;
+
+      // First call (canonical "hivemoot:voting") → 404
+      // Second call (legacy "phase:voting") → success
+      vi.mocked(mockClient.rest.issues.removeLabel)
+        .mockRejectedValueOnce(notFound)
+        .mockResolvedValueOnce({});
+
+      await issueOps.removeLabel(testRef, "hivemoot:voting");
+
+      expect(mockClient.rest.issues.removeLabel).toHaveBeenCalledTimes(2);
+      expect(mockClient.rest.issues.removeLabel).toHaveBeenNthCalledWith(1, {
+        owner: "test-org",
+        repo: "test-repo",
+        issue_number: 42,
+        name: "hivemoot:voting",
+      });
+      expect(mockClient.rest.issues.removeLabel).toHaveBeenNthCalledWith(2, {
+        owner: "test-org",
+        repo: "test-repo",
+        issue_number: 42,
+        name: "phase:voting",
+      });
+    });
+
+    it("should silently ignore when neither canonical nor legacy labels exist", async () => {
+      const notFound = new Error("Not Found") as Error & { status: number };
+      notFound.status = 404;
+
+      vi.mocked(mockClient.rest.issues.removeLabel).mockRejectedValue(notFound);
+
+      await expect(issueOps.removeLabel(testRef, "hivemoot:voting")).resolves.toBeUndefined();
+    });
   });
 
   describe("comment", () => {

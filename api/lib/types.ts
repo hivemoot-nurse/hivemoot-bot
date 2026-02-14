@@ -73,7 +73,7 @@ export interface ValidatedVoteResult {
  * "skipped" indicates the voting comment was not found and human help was requested.
  */
 export type VotingOutcome =
-  | "phase:ready-to-implement"
+  | "ready-to-implement"
   | "rejected"
   | "inconclusive"
   | "needs-more-discussion"
