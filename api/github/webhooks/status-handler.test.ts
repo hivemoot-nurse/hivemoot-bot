@@ -94,6 +94,34 @@ function createStatusContext(options?: {
   };
 }
 
+function createCheckContext(options?: {
+  event: "check_suite.completed" | "check_run.completed";
+  headSha?: string;
+  pullRequests?: Array<{ number: number }>;
+}) {
+  const event = options?.event ?? "check_suite.completed";
+  const headSha = options?.headSha ?? "abc123";
+  const pullRequests = options?.pullRequests ?? [];
+
+  return {
+    payload: {
+      repository: {
+        owner: { login: "hivemoot" },
+        name: "hivemoot-bot",
+        full_name: "hivemoot/hivemoot-bot",
+      },
+      [event === "check_suite.completed" ? "check_suite" : "check_run"]: {
+        head_sha: headSha,
+        pull_requests: pullRequests,
+      },
+    },
+    log: {
+      info: vi.fn(),
+      error: vi.fn(),
+    },
+  };
+}
+
 describe("status webhook handler", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -202,6 +230,64 @@ describe("status webhook handler", () => {
         repo: "hivemoot/hivemoot-bot",
       }),
       "Failed to evaluate merge-readiness after status event"
+    );
+  });
+
+  it("evaluates merge-readiness for each pull request in check_suite payload", async () => {
+    const { handlers } = createWebhookHarness();
+    const handler = handlers.get("check_suite.completed");
+    expect(handler).toBeDefined();
+
+    const context = createCheckContext({
+      event: "check_suite.completed",
+      headSha: "suite-sha",
+      pullRequests: [{ number: 21 }, { number: 34 }],
+    });
+
+    await handler!(context);
+
+    expect(mocks.evaluateMergeReadiness).toHaveBeenCalledTimes(2);
+    expect(mocks.evaluateMergeReadiness).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        ref: { owner: "hivemoot", repo: "hivemoot-bot", prNumber: 21 },
+        headSha: "suite-sha",
+      })
+    );
+    expect(mocks.evaluateMergeReadiness).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        ref: { owner: "hivemoot", repo: "hivemoot-bot", prNumber: 34 },
+        headSha: "suite-sha",
+      })
+    );
+  });
+
+  it("aggregates per-PR merge-readiness failures for check_run events", async () => {
+    const { handlers } = createWebhookHarness();
+    const handler = handlers.get("check_run.completed");
+    expect(handler).toBeDefined();
+
+    mocks.evaluateMergeReadiness
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("check API unavailable"));
+
+    const context = createCheckContext({
+      event: "check_run.completed",
+      headSha: "run-sha",
+      pullRequests: [{ number: 55 }, { number: 89 }],
+    });
+
+    await expect(handler!(context)).rejects.toThrow(
+      "1 PR(s) failed merge-readiness evaluation after check_run"
+    );
+
+    expect(context.log.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pr: 89,
+        repo: "hivemoot/hivemoot-bot",
+      }),
+      "Failed to evaluate merge-readiness after check_run"
     );
   });
 });
