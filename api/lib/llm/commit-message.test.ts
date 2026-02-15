@@ -41,7 +41,11 @@ describe("CommitMessageGenerator", () => {
     const generator = new CommitMessageGenerator({ logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn() } });
     const result = await generator.generate(sampleContext);
 
-    expect(result).toEqual({ success: false, reason: "LLM not configured" });
+    expect(result).toEqual({
+      success: false,
+      reason: "LLM not configured",
+      kind: "not_configured",
+    });
   });
 
   it("should succeed when pre-created model is provided", async () => {
@@ -121,7 +125,11 @@ describe("CommitMessageGenerator", () => {
     const generator = new CommitMessageGenerator({ logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn() } });
     const result = await generator.generate(sampleContext, { model: mockModel, config: mockConfig });
 
-    expect(result).toEqual({ success: false, reason: "API rate limited" });
+    expect(result).toEqual({
+      success: false,
+      reason: "API rate limited",
+      kind: "generation_failed",
+    });
   });
 });
 

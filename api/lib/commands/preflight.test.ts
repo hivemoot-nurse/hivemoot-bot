@@ -210,6 +210,7 @@ describe("/preflight command", () => {
           generate: vi.fn().mockResolvedValue({
             success: false,
             reason: "No object generated: could not parse the response.",
+            kind: "generation_failed",
           }),
         }) as never
     );
@@ -232,6 +233,7 @@ describe("/preflight command", () => {
           generate: vi.fn().mockResolvedValue({
             success: false,
             reason: "LLM not configured",
+            kind: "not_configured",
           }),
         }) as never
     );
@@ -243,5 +245,23 @@ describe("/preflight command", () => {
     expect(body).not.toContain("### Commit Message");
     expect(body).not.toContain("Proposed Commit Message");
     expect(body).not.toContain("LLM not configured");
+  });
+
+  it("should show generic warning when commit message generator throws", async () => {
+    const { CommitMessageGenerator } = await import("../llm/commit-message.js");
+    vi.mocked(CommitMessageGenerator).mockImplementationOnce(
+      () =>
+        ({
+          generate: vi.fn().mockRejectedValue(new Error("provider timeout")),
+        }) as never
+    );
+
+    const ctx = createPRCtx();
+    await executeCommand(ctx);
+
+    const body = (ctx.octokit.rest.issues.createComment.mock.calls[0][0] as { body: string }).body;
+    expect(body).toContain("### Commit Message");
+    expect(body).toContain("[warning] I couldn't generate a recommended commit message this time.");
+    expect(body).not.toContain("provider timeout");
   });
 });

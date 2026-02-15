@@ -96,7 +96,11 @@ function buildCommitMessagePrompt(context: PRContext): string {
 
 export type CommitMessageResult =
   | { success: true; message: CommitMessage }
-  | { success: false; reason: string };
+  | {
+      success: false;
+      reason: string;
+      kind: "not_configured" | "generation_failed";
+    };
 
 export interface CommitMessageGeneratorConfig {
   logger?: Logger;
@@ -116,7 +120,11 @@ export class CommitMessageGenerator {
     try {
       const modelResult = preCreatedModel ?? createModelFromEnv();
       if (!modelResult) {
-        return { success: false, reason: "LLM not configured" };
+        return {
+          success: false,
+          reason: "LLM not configured",
+          kind: "not_configured",
+        };
       }
 
       const { model, config } = modelResult;
@@ -152,7 +160,7 @@ export class CommitMessageGenerator {
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       this.logger.error(`Commit message generation failed: ${reason}`);
-      return { success: false, reason };
+      return { success: false, reason, kind: "generation_failed" };
     }
   }
 }

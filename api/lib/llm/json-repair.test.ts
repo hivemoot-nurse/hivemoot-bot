@@ -18,6 +18,16 @@ describe("extractLikelyJsonPayload", () => {
     expect(extractLikelyJsonPayload(text)).toBe("{\"color\":\"blue\"}");
   });
 
+  it("extracts balanced JSON when trailing commentary exists", () => {
+    const text = "Here is the result: {\"subject\":\"Fix bug\"} and some trailing text";
+    expect(extractLikelyJsonPayload(text)).toBe("{\"subject\":\"Fix bug\"}");
+  });
+
+  it("extracts balanced JSON when content starts with JSON and has trailing text", () => {
+    const text = "{\"subject\":\"Fix bug\"} and some trailing text";
+    expect(extractLikelyJsonPayload(text)).toBe("{\"subject\":\"Fix bug\"}");
+  });
+
   it("returns null when no repair candidate exists", () => {
     expect(extractLikelyJsonPayload("plain text without json")).toBeNull();
   });
@@ -31,7 +41,7 @@ describe("repairMalformedJsonText", () => {
   it("returns repaired payload when recoverable", async () => {
     const repaired = await repairMalformedJsonText({
       text: "```json\n{\"value\":1}\n```",
-      error: {} as never,
+      error: { message: "JSON parsing failed" } as never,
     });
     expect(repaired).toBe("{\"value\":1}");
   });
@@ -39,9 +49,16 @@ describe("repairMalformedJsonText", () => {
   it("returns null when text should not be modified", async () => {
     const repaired = await repairMalformedJsonText({
       text: "{\"already\":\"json\"}",
-      error: {} as never,
+      error: { message: "JSON parsing failed" } as never,
+    });
+    expect(repaired).toBeNull();
+  });
+
+  it("returns null for non-parse errors", async () => {
+    const repaired = await repairMalformedJsonText({
+      text: "```json\n{\"value\":1}\n```",
+      error: { message: "schema validation failed" } as never,
     });
     expect(repaired).toBeNull();
   });
 });
-

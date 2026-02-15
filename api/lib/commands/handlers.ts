@@ -347,9 +347,7 @@ async function handlePreflight(ctx: CommandContext): Promise<CommandResult> {
         body += `### Proposed Commit Message\n\n`;
         body += "```\n" + formatted + "\n```\n\n";
         body += `Copy this into the squash merge dialog, or edit as needed.\n\n`;
-      } else if (result.reason !== "LLM not configured") {
-        // Hide provider/internal parsing details from user-facing output.
-        // References: hivemoot/hivemoot-bot#126, #127.
+      } else if (result.kind === "generation_failed") {
         body += `### Commit Message\n\n`;
         body += `${commitMessageWarning}\n\n`;
       }
