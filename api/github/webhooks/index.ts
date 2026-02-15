@@ -73,6 +73,7 @@ interface LabelBootstrapSummary {
   reposFailed: number;
   labelsCreated: number;
   labelsRenamed: number;
+  labelsUpdated: number;
   labelsSkipped: number;
 }
 
@@ -183,7 +184,7 @@ async function ensureLabelsForRepositories(
   if (targetRepositories.length === 0) {
     context.log.info(`[${eventName}] No installation repositories available; skipping label bootstrap`);
     context.log.info(
-      `[${eventName}] Label bootstrap summary: reposProcessed=0, reposFailed=0, labelsCreated=0, labelsSkipped=0`
+      `[${eventName}] Label bootstrap summary: reposProcessed=0, reposFailed=0, labelsCreated=0, labelsRenamed=0, labelsUpdated=0, labelsSkipped=0`
     );
     return;
   }
@@ -195,6 +196,7 @@ async function ensureLabelsForRepositories(
     reposFailed: 0,
     labelsCreated: 0,
     labelsRenamed: 0,
+    labelsUpdated: 0,
     labelsSkipped: 0,
   };
 
@@ -204,9 +206,10 @@ async function ensureLabelsForRepositories(
       const result = await labelService.ensureRequiredLabels(owner, repo);
       summary.labelsCreated += result.created;
       summary.labelsRenamed += result.renamed;
+      summary.labelsUpdated += result.updated;
       summary.labelsSkipped += result.skipped;
       context.log.info(
-        `[${eventName}] Ensured labels in ${fullName}: created=${result.created}, renamed=${result.renamed}, skipped=${result.skipped}`
+        `[${eventName}] Ensured labels in ${fullName}: created=${result.created}, renamed=${result.renamed}, updated=${result.updated}, skipped=${result.skipped}`
       );
     } catch (error) {
       summary.reposFailed += 1;
@@ -216,7 +219,7 @@ async function ensureLabelsForRepositories(
   }
 
   context.log.info(
-    `[${eventName}] Label bootstrap summary: reposProcessed=${summary.reposProcessed}, reposFailed=${summary.reposFailed}, labelsCreated=${summary.labelsCreated}, labelsRenamed=${summary.labelsRenamed}, labelsSkipped=${summary.labelsSkipped}`
+    `[${eventName}] Label bootstrap summary: reposProcessed=${summary.reposProcessed}, reposFailed=${summary.reposFailed}, labelsCreated=${summary.labelsCreated}, labelsRenamed=${summary.labelsRenamed}, labelsUpdated=${summary.labelsUpdated}, labelsSkipped=${summary.labelsSkipped}`
   );
 
   if (errors.length > 0) {
