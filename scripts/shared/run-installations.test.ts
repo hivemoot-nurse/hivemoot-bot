@@ -109,6 +109,14 @@ describe("run-installations shared runner", () => {
       afterAll,
     });
 
+    expect(App).toHaveBeenCalledTimes(1);
+    expect(App).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appId: "12345",
+        privateKey: "test-private-key",
+        Octokit: expect.any(Function),
+      })
+    );
     expect(processRepository).toHaveBeenCalledTimes(3);
     expect(afterAll).toHaveBeenCalledWith({
       results: [
