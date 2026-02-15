@@ -49,6 +49,15 @@ describe("extractLikelyJsonPayload", () => {
       "{\"subject\":\"Fix \\\"quoted\\\" term\",\"body\":\"Details\"}"
     );
   });
+
+  it("returns null for truncated JSON without closing brace", () => {
+    const text = "Preamble: {\"subject\":\"Fix bug\",\"body\":\"Still writing...";
+    expect(extractLikelyJsonPayload(text)).toBeNull();
+  });
+
+  it("returns null for empty string", () => {
+    expect(extractLikelyJsonPayload("")).toBeNull();
+  });
 });
 
 describe("repairMalformedJsonText", () => {
