@@ -1,10 +1,8 @@
 name: reconcile-pr-notifications
 
 on:
-  schedule:
-    - cron: "20,50 * * * *"  # Every 30 minutes (staggered +20)
   workflow_dispatch:
-    # Manual trigger for testing
+    # Manual trigger for testing (scheduled runs only on main hivemoot/hivemoot-bot repo)
 
 # Prevent overlapping runs of this workflow
 concurrency:

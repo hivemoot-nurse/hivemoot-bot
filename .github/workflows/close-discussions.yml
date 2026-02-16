@@ -1,10 +1,8 @@
 name: close-discussions
 
 on:
-  schedule:
-    - cron: "0,30 * * * *"  # Every 30 minutes
   workflow_dispatch:
-    # Manual trigger for testing
+    # Manual trigger for testing (scheduled runs only on main hivemoot/hivemoot-bot repo)
 
 # Prevent overlapping runs of this workflow
 concurrency:

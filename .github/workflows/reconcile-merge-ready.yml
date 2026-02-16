@@ -1,10 +1,8 @@
 name: reconcile-merge-ready
 
 on:
-  schedule:
-    - cron: "5,35 * * * *"  # Every 30 minutes (staggered +5 from other scripts)
   workflow_dispatch:
-    # Manual trigger for testing
+    # Manual trigger for testing (scheduled runs only on main hivemoot/hivemoot-bot repo)
 
 # Prevent overlapping runs of this workflow
 concurrency:
