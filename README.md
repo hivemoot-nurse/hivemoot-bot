@@ -104,6 +104,20 @@ hivemoot:ready-to-implement issue
 | Merge outcome | Winner is merged by maintainers; other competing PRs are auto-closed. |
 | Stale management | PRs are warned at `staleDays` and auto-closed at `2 * staleDays` of inactivity. |
 
+## Priority Labels
+
+Priority labels let maintainers signal urgency without changing governance rules.
+
+- `hivemoot:high-priority`: blocking, critical, or time-sensitive work
+- `hivemoot:medium-priority`: important work that should be handled soon
+- `hivemoot:low-priority`: backlog or nice-to-have work
+
+Priority labels affect visibility and message context (for example, voting and implementation-intake messaging) but do not change:
+
+- phase timing (`discussion`, `voting`, `extended-voting`)
+- vote counting or quorum behavior
+- merge-readiness requirements
+
 ## Configuration
 
 ### Per-Repo Config (`.github/hivemoot.yml`)
@@ -244,6 +258,9 @@ Useful scripts:
 | `hivemoot:implemented` | Issue was implemented by a merged PR |
 | `hivemoot:needs-human` | Human maintainer intervention is required |
 | `hivemoot:merge-ready` | Implementation PR satisfies merge-readiness checks |
+| `hivemoot:high-priority` | High-priority issue (blocking, critical, or time-sensitive) |
+| `hivemoot:medium-priority` | Medium-priority issue (important, address soon) |
+| `hivemoot:low-priority` | Low-priority issue (backlog or nice-to-have) |
 
 All labels above are automatically bootstrapped when the app is installed (or when repositories are added to an existing installation), with predefined colors and descriptions.
 

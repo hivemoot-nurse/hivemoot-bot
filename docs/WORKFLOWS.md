@@ -2,6 +2,20 @@
 
 Overview of supported governance workflows.
 
+## Priority Overlay
+
+Priority labels provide an urgency signal across issue and PR workflows:
+
+- `hivemoot:high-priority`
+- `hivemoot:medium-priority`
+- `hivemoot:low-priority`
+
+Priority is an overlay, not a rule change. It helps with message context and work ordering but does not change:
+
+- phase durations
+- vote thresholds or quorum requirements
+- merge-readiness logic
+
 ## Issues Workflow
 
 Issues go through a timed governance lifecycle with community voting.
@@ -36,6 +50,7 @@ Scheduled transitions are controlled per phase via `exits[].type`:
 - Triggered: When issue is opened
 - Actions: Add "hivemoot:discussion" label, post welcome comment
 - Community: Analyze, propose, discuss
+- Priority behavior: Priority labels can be set/updated during discussion to signal urgency.
 
 **Voting Phase**
 - Triggered: After discussion duration expires
@@ -45,6 +60,7 @@ Scheduled transitions are controlled per phase via `exits[].type`:
   - 👎 to oppose
   - 😕 to abstain/need more info
   - 👀 to request human intervention
+- Priority behavior: Voting messages may include the issue priority context when a priority label is present.
 
 **Outcome**
 - **Ready to implement:** 👍 > 👎 — issue stays open for implementation, locked
@@ -114,6 +130,7 @@ PRs go through a complete lifecycle from opening to merge/close, with special ha
 ### Step 1: PR Opened
 
 When any PR is opened, the bot posts a welcome comment with a review checklist. This happens regardless of whether the PR is an implementation of a hivemoot:ready-to-implement issue.
+When the linked issue has a priority label, implementation-intake messaging can include that priority context.
 
 ### Step 2: Issue Linking Check
 
