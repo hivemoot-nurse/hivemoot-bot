@@ -124,7 +124,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          deploy_output="$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }} 2>&1)"
+          deploy_output="$(vercel deploy --prebuilt --prod --archive=tgz --token=${{ secrets.VERCEL_TOKEN }} 2>&1)"
           echo "$deploy_output"
 
           deploy_url="$(printf '%s\n' "$deploy_output" | grep -Eo 'https://[^[:space:]]+\.vercel\.app' | tail -n1 || true)"
