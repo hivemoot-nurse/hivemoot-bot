@@ -73,6 +73,24 @@ Before opening or updating a PR:
 - Address all review comments before requesting re-review.
 - Keep changes focused and reviewable — one concern per PR.
 
+## Testing Patterns
+
+### Constructor mocks
+
+When mocking a class that will be instantiated with `new`, use a named `function` (not an arrow function). Arrow functions are not constructable and will cause CI failures:
+
+```typescript
+// ✅ Correct: function declaration is constructable
+vi.mocked(App).mockImplementation(function (this: App, ...) {
+  // mock setup
+} as unknown as typeof App);
+
+// ❌ Wrong: arrow function throws "X is not a constructor"
+vi.mocked(App).mockImplementation(() => ({ ... }));
+```
+
+This matters for `Probot`, `App`, and any other imported class used with `new` in source code.
+
 ## GitHub CLI Compatibility Notes
 
 Some `gh` builds request deprecated GraphQL fields in default output paths. If you see errors mentioning `projectCards`, use explicit JSON fields:
