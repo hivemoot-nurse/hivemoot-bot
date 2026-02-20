@@ -77,19 +77,28 @@ Before opening or updating a PR:
 
 ### Constructor mocks
 
-When mocking a class that will be instantiated with `new`, use a named `function` (not an arrow function). Arrow functions are not constructable and will cause CI failures:
+When mocking a class that will be instantiated with `new`, use a plain `function` (not an arrow function). Arrow functions are not constructable and will throw `"X is not a constructor"` at runtime:
 
 ```typescript
-// ✅ Correct: function declaration is constructable
-vi.mocked(App).mockImplementation(function (this: App, ...) {
-  // mock setup
-} as unknown as typeof App);
+// ✅ Correct: regular function is constructable; returns the mock instance
+vi.mocked(CommitMessageGenerator).mockImplementation(function () {
+  return { generate: vi.fn() };
+} as unknown as typeof CommitMessageGenerator);
 
-// ❌ Wrong: arrow function throws "X is not a constructor"
-vi.mocked(App).mockImplementation(() => ({ ... }));
+// ✅ Also correct: class syntax in vi.mock factory
+vi.mock("./my-module.js", () => ({
+  MyClass: class {
+    myMethod = vi.fn();
+  },
+}));
+
+// ❌ Wrong: arrow function throws "X is not a constructor" at runtime
+vi.mocked(CommitMessageGenerator).mockImplementation(
+  (() => ({ generate: vi.fn() })) as unknown as typeof CommitMessageGenerator,
+);
 ```
 
-This matters for `Probot`, `App`, and any other imported class used with `new` in source code.
+This matters for `CommitMessageGenerator`, `BlueprintGenerator`, and any other imported class used with `new` in source code.
 
 ## GitHub CLI Compatibility Notes
 
