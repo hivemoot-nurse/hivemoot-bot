@@ -1039,18 +1039,20 @@ async function runLabelDoctorCheck(ctx: CommandContext): Promise<DoctorCheckResu
   const labels = createRepositoryLabelService(ctx.octokit as unknown);
   const result = await labels.auditRequiredLabels(ctx.owner, ctx.repo);
   const totalExpected = REQUIRED_REPOSITORY_LABELS.length;
-  const issues = result.missing.length + result.colorMismatch.length + result.renameable.length;
-  const status: DoctorCheckStatus = issues === 0 ? "pass" : "fail";
+  const hardIssues = result.missing.length + result.colorMismatch.length;
+  const status: DoctorCheckStatus =
+    hardIssues > 0 ? "fail" : result.renameable.length > 0 ? "advisory" : "pass";
 
   let detail: string;
-  if (issues === 0) {
+  if (status === "pass") {
     detail = `All ${totalExpected} labels present and correct`;
   } else {
     const parts: string[] = [];
     if (result.missing.length > 0) parts.push(`${result.missing.length} missing`);
-    if (result.renameable.length > 0) parts.push(`${result.renameable.length} renameable from legacy`);
     if (result.colorMismatch.length > 0) parts.push(`${result.colorMismatch.length} with color/description drift`);
-    detail = `${issues} issue(s): ${parts.join(", ")} — run \`/doctor repair\` to fix`;
+    if (result.renameable.length > 0) parts.push(`${result.renameable.length} renameable from legacy`);
+    const totalIssues = hardIssues + result.renameable.length;
+    detail = `${totalIssues} issue(s): ${parts.join(", ")} — run \`/doctor repair\` to fix`;
   }
 
   const subItems: string[] = [

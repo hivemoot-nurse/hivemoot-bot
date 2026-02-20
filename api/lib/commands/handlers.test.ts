@@ -467,6 +467,25 @@ describe("executeCommand", () => {
       expect(commentArgs.body).toContain("Renameable: `phase:voting` → `hivemoot:voting`");
     });
 
+    it("should report advisory status when only renameable labels exist (no missing or drifted)", async () => {
+      mockLabelService.auditRequiredLabels.mockResolvedValueOnce({
+        missing: [],
+        colorMismatch: [],
+        renameable: [{ from: "phase:voting", to: "hivemoot:voting" }],
+        ok: REQUIRED_REPOSITORY_LABELS.length - 1,
+      });
+
+      const ctx = createCtx({ verb: "doctor" });
+      await executeCommand(ctx);
+
+      const [commentArgs] = ctx.octokit.rest.issues.createComment.mock.calls[0];
+      expect(commentArgs.body).toContain("run `/doctor repair` to fix");
+      expect(commentArgs.body).toContain("Renameable: `phase:voting` → `hivemoot:voting`");
+      // Advisory icon [!] should appear, not failure icon [ ]
+      expect(commentArgs.body).toContain("[!]");
+      expect(commentArgs.body).not.toContain("[ ] **Labels**");
+    });
+
     it("should run repair and report mutations when /doctor repair is invoked", async () => {
       const ctx = createCtx({ verb: "doctor", freeText: "repair" });
       const result = await executeCommand(ctx);
