@@ -27,9 +27,11 @@ import {
 } from "../../lib/implementation-intake.js";
 import { parseCommand, executeCommand } from "../../lib/commands/index.js";
 import { getLLMReadiness } from "../../lib/llm/provider.js";
+import { registerHandlerDispatcher } from "../../handlers/dispatcher.js";
+import { handlerEventMap } from "../../handlers/registry.js";
 
 /**
- * Queen Bot - Hivemoot Governance Automation
+ * Hivemoot Bot - Governance Automation
  *
  * Handles GitHub webhooks for AI agent community governance:
  * - New issues: Add `hivemoot:discussion` label + welcome message
@@ -237,6 +239,7 @@ async function ensureLabelsForRepositories(
 
 export function app(probotApp: Probot): void {
   probotApp.log.info("Queen bot initialized");
+  registerHandlerDispatcher(probotApp, { eventMap: handlerEventMap });
 
   /**
    * Bootstrap required labels when the app is first installed.
@@ -275,8 +278,12 @@ export function app(probotApp: Probot): void {
       );
       const issueWelcomeMessage =
         hasAutomaticDiscussion ? MESSAGES.ISSUE_WELCOME_VOTING : MESSAGES.ISSUE_WELCOME_MANUAL;
+      const installationId = context.payload.installation?.id;
 
-      await governance.startDiscussion({ owner, repo, issueNumber: number }, issueWelcomeMessage);
+      await governance.startDiscussion(
+        { owner, repo, issueNumber: number, installationId },
+        issueWelcomeMessage
+      );
     } catch (error) {
       context.log.error({ err: error, issue: number, repo: fullName }, "Failed to process issue");
       throw error;
@@ -348,20 +355,22 @@ export function app(probotApp: Probot): void {
         );
       }
 
-      await processImplementationIntake({
-        octokit: context.octokit,
-        issues,
-        prs,
-        log: context.log,
-        owner,
-        repo,
-        prNumber: number,
-        linkedIssues,
-        trigger: "opened",
-        maxPRsPerIssue: repoConfig.governance.pr.maxPRsPerIssue,
-        trustedReviewers: repoConfig.governance.pr.trustedReviewers,
-        intake: repoConfig.governance.pr.intake,
-      });
+      if (repoConfig.governance.pr) {
+        await processImplementationIntake({
+          octokit: context.octokit,
+          issues,
+          prs,
+          log: context.log,
+          owner,
+          repo,
+          prNumber: number,
+          linkedIssues,
+          trigger: "opened",
+          maxPRsPerIssue: repoConfig.governance.pr.maxPRsPerIssue,
+          trustedReviewers: repoConfig.governance.pr.trustedReviewers,
+          intake: repoConfig.governance.pr.intake,
+        });
+      }
     } catch (error) {
       context.log.error({ err: error, pr: number, repo: fullName }, "Failed to process PR");
       throw error;
@@ -398,20 +407,22 @@ export function app(probotApp: Probot): void {
       const prRef = { owner, repo, prNumber: number };
       await prs.removeLabel(prRef, LABELS.MERGE_READY);
 
-      await processImplementationIntake({
-        octokit: context.octokit,
-        issues,
-        prs,
-        log: context.log,
-        owner,
-        repo,
-        prNumber: number,
-        linkedIssues,
-        trigger: "updated",
-        maxPRsPerIssue: repoConfig.governance.pr.maxPRsPerIssue,
-        trustedReviewers: repoConfig.governance.pr.trustedReviewers,
-        intake: repoConfig.governance.pr.intake,
-      });
+      if (repoConfig.governance.pr) {
+        await processImplementationIntake({
+          octokit: context.octokit,
+          issues,
+          prs,
+          log: context.log,
+          owner,
+          repo,
+          prNumber: number,
+          linkedIssues,
+          trigger: "updated",
+          maxPRsPerIssue: repoConfig.governance.pr.maxPRsPerIssue,
+          trustedReviewers: repoConfig.governance.pr.trustedReviewers,
+          intake: repoConfig.governance.pr.intake,
+        });
+      }
     } catch (error) {
       context.log.error({ err: error, pr: number, repo: fullName }, "Failed to process PR update");
       throw error;
@@ -444,21 +455,23 @@ export function app(probotApp: Probot): void {
         loadRepositoryConfig(context.octokit, owner, repo),
       ]);
 
-      await processImplementationIntake({
-        octokit: context.octokit,
-        issues,
-        prs,
-        log: context.log,
-        owner,
-        repo,
-        prNumber: number,
-        linkedIssues,
-        trigger: "edited",
-        maxPRsPerIssue: repoConfig.governance.pr.maxPRsPerIssue,
-        trustedReviewers: repoConfig.governance.pr.trustedReviewers,
-        intake: repoConfig.governance.pr.intake,
-        editedAt: new Date(context.payload.pull_request.updated_at),
-      });
+      if (repoConfig.governance.pr) {
+        await processImplementationIntake({
+          octokit: context.octokit,
+          issues,
+          prs,
+          log: context.log,
+          owner,
+          repo,
+          prNumber: number,
+          linkedIssues,
+          trigger: "edited",
+          maxPRsPerIssue: repoConfig.governance.pr.maxPRsPerIssue,
+          trustedReviewers: repoConfig.governance.pr.trustedReviewers,
+          intake: repoConfig.governance.pr.intake,
+          editedAt: new Date(context.payload.pull_request.updated_at),
+        });
+      }
     } catch (error) {
       context.log.error({ err: error, pr: number, repo: fullName }, "Failed to process PR edit");
       throw error;
@@ -493,6 +506,7 @@ export function app(probotApp: Probot): void {
           owner,
           repo,
           issueNumber: issue.number,
+          installationId: context.payload.installation?.id,
           commentId: comment.id,
           senderLogin: comment.user.login,
           verb: parsed.verb,
@@ -520,20 +534,22 @@ export function app(probotApp: Probot): void {
         loadRepositoryConfig(context.octokit, owner, repo),
       ]);
 
-      await processImplementationIntake({
-        octokit: context.octokit,
-        issues,
-        prs,
-        log: context.log,
-        owner,
-        repo,
-        prNumber,
-        linkedIssues,
-        trigger: "updated",
-        maxPRsPerIssue: repoConfig.governance.pr.maxPRsPerIssue,
-        trustedReviewers: repoConfig.governance.pr.trustedReviewers,
-        intake: repoConfig.governance.pr.intake,
-      });
+      if (repoConfig.governance.pr) {
+        await processImplementationIntake({
+          octokit: context.octokit,
+          issues,
+          prs,
+          log: context.log,
+          owner,
+          repo,
+          prNumber,
+          linkedIssues,
+          trigger: "updated",
+          maxPRsPerIssue: repoConfig.governance.pr.maxPRsPerIssue,
+          trustedReviewers: repoConfig.governance.pr.trustedReviewers,
+          intake: repoConfig.governance.pr.intake,
+        });
+      }
     } catch (error) {
       context.log.error({ err: error, issue: issue.number, repo: fullName }, "Failed to process comment");
       throw error;
@@ -592,8 +608,8 @@ export function app(probotApp: Probot): void {
         for (const competingPR of competingPRs) {
           if (competingPR.number !== number) {
             const prRef = { owner, repo, prNumber: competingPR.number };
-            await prs.comment(prRef, PR_MESSAGES.prSuperseded(number));
             await prs.close(prRef);
+            await prs.comment(prRef, PR_MESSAGES.prSuperseded(number));
             await prs.removeGovernanceLabels(prRef);
             context.log.info(`Closed competing PR #${competingPR.number}`);
           }
@@ -627,33 +643,35 @@ export function app(probotApp: Probot): void {
           : Promise.resolve(),
       ]);
 
-      // Intake processing only on approvals
-      if (isApproval) {
-        await processImplementationIntake({
-          octokit: context.octokit,
-          issues,
+      if (repoConfig.governance.pr) {
+        // Intake processing only on approvals
+        if (isApproval) {
+          await processImplementationIntake({
+            octokit: context.octokit,
+            issues,
+            prs,
+            log: context.log,
+            owner,
+            repo,
+            prNumber: number,
+            linkedIssues,
+            trigger: "updated",
+            maxPRsPerIssue: repoConfig.governance.pr.maxPRsPerIssue,
+            trustedReviewers: repoConfig.governance.pr.trustedReviewers,
+            intake: repoConfig.governance.pr.intake,
+          });
+        }
+
+        // Merge-readiness evaluation on ALL review states (approval may satisfy threshold,
+        // non-approval may invalidate it via changes_requested/dismissal)
+        await evaluateMergeReadiness({
           prs,
-          log: context.log,
-          owner,
-          repo,
-          prNumber: number,
-          linkedIssues,
-          trigger: "updated",
-          maxPRsPerIssue: repoConfig.governance.pr.maxPRsPerIssue,
+          ref: { owner, repo, prNumber: number },
+          config: repoConfig.governance.pr.mergeReady,
           trustedReviewers: repoConfig.governance.pr.trustedReviewers,
-          intake: repoConfig.governance.pr.intake,
+          log: context.log,
         });
       }
-
-      // Merge-readiness evaluation on ALL review states (approval may satisfy threshold,
-      // non-approval may invalidate it via changes_requested/dismissal)
-      await evaluateMergeReadiness({
-        prs,
-        ref: { owner, repo, prNumber: number },
-        config: repoConfig.governance.pr.mergeReady,
-        trustedReviewers: repoConfig.governance.pr.trustedReviewers,
-        log: context.log,
-      });
     } catch (error) {
       context.log.error({ err: error, pr: number, repo: fullName }, "Failed to process PR review");
       throw error;
@@ -677,13 +695,15 @@ export function app(probotApp: Probot): void {
       ]);
 
       // Dismissed approval may drop below threshold
-      await evaluateMergeReadiness({
-        prs,
-        ref: { owner, repo, prNumber: number },
-        config: repoConfig.governance.pr.mergeReady,
-        trustedReviewers: repoConfig.governance.pr.trustedReviewers,
-        log: context.log,
-      });
+      if (repoConfig.governance.pr) {
+        await evaluateMergeReadiness({
+          prs,
+          ref: { owner, repo, prNumber: number },
+          config: repoConfig.governance.pr.mergeReady,
+          trustedReviewers: repoConfig.governance.pr.trustedReviewers,
+          log: context.log,
+        });
+      }
     } catch (error) {
       context.log.error({ err: error, pr: number, repo: fullName }, "Failed to update leaderboard after review dismissal");
       throw error;
@@ -705,18 +725,20 @@ export function app(probotApp: Probot): void {
       const prs = createPROperations(context.octokit, { appId });
       const repoConfig = await loadRepositoryConfig(context.octokit, owner, repo);
 
-      const currentLabels = context.payload.pull_request.labels?.map(
-        (l: { name: string }) => l.name
-      );
+      if (repoConfig.governance.pr) {
+        const currentLabels = context.payload.pull_request.labels?.map(
+          (l: { name: string }) => l.name
+        );
 
-      await evaluateMergeReadiness({
-        prs,
-        ref: { owner, repo, prNumber: number },
-        config: repoConfig.governance.pr.mergeReady,
-        trustedReviewers: repoConfig.governance.pr.trustedReviewers,
-        currentLabels,
-        log: context.log,
-      });
+        await evaluateMergeReadiness({
+          prs,
+          ref: { owner, repo, prNumber: number },
+          config: repoConfig.governance.pr.mergeReady,
+          trustedReviewers: repoConfig.governance.pr.trustedReviewers,
+          currentLabels,
+          log: context.log,
+        });
+      }
     } catch (error) {
       context.log.error({ err: error, pr: number, repo: fullName }, "Failed to evaluate merge-readiness after label change");
       throw error;
@@ -738,6 +760,8 @@ export function app(probotApp: Probot): void {
       const appId = getAppId();
       const prs = createPROperations(context.octokit, { appId });
       const repoConfig = await loadRepositoryConfig(context.octokit, owner, repo);
+
+      if (!repoConfig.governance.pr) return;
 
       const errors: Error[] = [];
       for (const pr of pull_requests) {
@@ -784,6 +808,8 @@ export function app(probotApp: Probot): void {
       const prs = createPROperations(context.octokit, { appId });
       const repoConfig = await loadRepositoryConfig(context.octokit, owner, repo);
 
+      if (!repoConfig.governance.pr) return;
+
       const errors: Error[] = [];
       for (const pr of pull_requests) {
         try {
@@ -826,7 +852,7 @@ export function app(probotApp: Probot): void {
       const prs = createPROperations(context.octokit, { appId });
       const repoConfig = await loadRepositoryConfig(context.octokit, owner, repo);
 
-      if (!repoConfig.governance.pr.mergeReady) return;
+      if (!repoConfig.governance.pr?.mergeReady) return;
 
       // Find open PRs with this commit SHA via search
       const { data } = await context.octokit.rest.pulls.list({
@@ -893,8 +919,9 @@ export function app(probotApp: Probot): void {
       const appId = getAppId();
       const issues = createIssueOperations(context.octokit, { appId });
       const governance = createGovernanceService(issues);
+      const installationId = context.payload.installation?.id;
       const result = await governance.postVotingComment({
-        owner, repo, issueNumber: issue.number,
+        owner, repo, issueNumber: issue.number, installationId,
       });
       context.log.info(`Voting comment for issue #${issue.number}: ${result}`);
     } catch (error) {
@@ -911,7 +938,12 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const probot = createProbot();
+// Suppress Probot's auto-detection of REDIS_URL for bottleneck rate-limit
+// clustering. When REDIS_URL is set in the Vercel environment, Probot opens a
+// raw ioredis TCP connection that goes stale between serverless invocations,
+// causing ECONNRESET/EPIPE errors that silently drop webhook commands.
+// The bot does not use distributed rate limiting; force the local datastore.
+const probot = createProbot({ overrides: { redisConfig: "" } });
 const middleware = createNodeMiddleware(app, {
   probot,
   webhooksPath: "/api/github/webhooks",

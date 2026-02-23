@@ -24,6 +24,7 @@ import {
 import { runForAllRepositories, runIfMain } from "./shared/run-installations.js";
 import type { Repository, PRRef, EffectiveConfig } from "../api/lib/index.js";
 import type { PROperations } from "../api/lib/pr-operations.js";
+import type { InstallationContext } from "./shared/run-installations.js";
 
 /**
  * Calculate days since last activity.
@@ -95,7 +96,8 @@ export async function processPR(
 export async function processRepository(
   octokit: InstanceType<typeof Octokit>,
   repo: Repository,
-  appId: number
+  appId: number,
+  _installation?: InstallationContext
 ): Promise<void> {
   const owner = repo.owner.login;
   const repoName = repo.name;
@@ -105,6 +107,12 @@ export async function processRepository(
   try {
     // Load per-repo configuration (falls back to defaults if not present)
     const repoConfig: EffectiveConfig = await loadRepositoryConfig(octokit, owner, repoName);
+
+    // PR workflows disabled for this repo — skip stale cleanup
+    if (!repoConfig.governance.pr) {
+      logger.debug("PR workflows disabled (no pr: section in config). Skipping.");
+      return;
+    }
 
     const prs = createPROperations(octokit, { appId });
 

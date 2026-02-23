@@ -21,6 +21,7 @@ import { repairMalformedJsonText } from "./llm/json-repair.js";
 import { createModelFromEnv } from "./llm/provider.js";
 import { STANDUP_SYSTEM_PROMPT, buildStandupUserPrompt } from "./llm/prompts.js";
 import { withLLMRetry } from "./llm/retry.js";
+import { LLM_DEFAULTS } from "./llm/types.js";
 import { logger } from "./logger.js";
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -84,6 +85,10 @@ export interface StandupLLMContent {
     focusAreas: string;
     needsAttention: string;
   };
+}
+
+export interface StandupLLMContext {
+  installationId?: number;
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -710,10 +715,15 @@ function validateLLMOutput(
  * Returns null if LLM is not configured or fails.
  */
 export async function generateStandupLLMContent(
-  data: StandupData
+  data: StandupData,
+  llmContext?: StandupLLMContext
 ): Promise<StandupLLMContent | null> {
   try {
-    const modelResult = createModelFromEnv();
+    const modelResult = await createModelFromEnv(
+      llmContext?.installationId !== undefined
+        ? { installationId: llmContext.installationId }
+        : undefined
+    );
     if (!modelResult) {
       logger.debug("LLM not configured, skipping standup narration");
       return null;
@@ -739,6 +749,7 @@ export async function generateStandupLLMContent(
           maxTokens: config.maxTokens,
           temperature: 0.4,
           maxRetries: 0, // Disable SDK retry; our wrapper handles rate-limits
+          abortSignal: AbortSignal.timeout(LLM_DEFAULTS.perCallTimeoutMs),
         }),
       undefined,
       logger
@@ -755,9 +766,11 @@ export async function generateStandupLLMContent(
     logger.info("Standup narrative generated and validated successfully");
     return validated;
   } catch (error) {
-    // Covers both config errors (missing API key) and runtime failures.
     // LLM is Layer 1 (optional) — degrade gracefully to template-only.
-    logger.warn(`LLM standup generation failed: ${(error as Error).message}`);
+    // BYOK infrastructure failures are logged at error for operator visibility.
+    const message = error instanceof Error ? error.message : String(error);
+    const isByokRuntime = message.startsWith("BYOK ");
+    logger[isByokRuntime ? "error" : "warn"](`LLM standup generation failed: ${message}`);
     return null;
   }
 }

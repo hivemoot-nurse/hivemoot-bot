@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { GovernanceService } from "../../lib/governance.js";
 import { createIssueOperations } from "../../lib/github-client.js";
-import { getLinkedIssues } from "../../lib/graphql-queries.js";
+import { getLinkedIssues, getOpenPRsForIssue } from "../../lib/graphql-queries.js";
 import { processImplementationIntake, recalculateLeaderboardForPR } from "../../lib/implementation-intake.js";
 import { evaluateMergeReadiness, loadRepositoryConfig } from "../../lib/index.js";
 import { LABELS, MESSAGES, REQUIRED_REPOSITORY_LABELS } from "../../config.js";
@@ -31,6 +31,7 @@ vi.mock("../../lib/graphql-queries.js", async (importOriginal) => {
   return {
     ...actual,
     getLinkedIssues: vi.fn().mockResolvedValue([]),
+    getOpenPRsForIssue: vi.fn().mockResolvedValue([]),
   };
 });
 
@@ -45,6 +46,12 @@ vi.mock("../../lib/index.js", async () => {
     ...actual,
     loadRepositoryConfig: vi.fn().mockResolvedValue({
       governance: {
+        proposals: {
+          discussion: {
+            exits: [{ type: "manual" }],
+            durationMs: 0,
+          },
+        },
         pr: {
           maxPRsPerIssue: 3,
           trustedReviewers: [],
@@ -718,6 +725,10 @@ describe("Queen Bot", () => {
           getCollaboratorPermissionLevel: vi.fn().mockResolvedValue({
             data: { permission },
           }),
+          getContent: vi.fn().mockRejectedValue({ status: 404 }),
+          getCombinedStatusForRef: vi.fn().mockResolvedValue({
+            data: { state: "success", total_count: 0, statuses: [] },
+          }),
         },
         reactions: {
           createForIssueComment: vi.fn().mockResolvedValue({}),
@@ -729,14 +740,27 @@ describe("Queen Bot", () => {
           addLabels: vi.fn().mockResolvedValue({}),
           removeLabel: vi.fn().mockResolvedValue({}),
           createComment: vi.fn().mockResolvedValue({}),
+          listLabelsForRepo: vi.fn().mockResolvedValue({ data: [] }),
+          createLabel: vi.fn().mockResolvedValue({}),
+          updateLabel: vi.fn().mockResolvedValue({}),
           update: vi.fn().mockResolvedValue({}),
           lock: vi.fn().mockResolvedValue({}),
           unlock: vi.fn().mockResolvedValue({}),
           listComments: vi.fn().mockResolvedValue({ data: [] }),
           listEventsForTimeline: vi.fn().mockResolvedValue({ data: [] }),
+          listForRepo: vi.fn().mockResolvedValue({ data: [] }),
         },
         pulls: {
           get: vi.fn().mockResolvedValue({ data: {} }),
+          update: vi.fn().mockResolvedValue({}),
+          listReviews: vi.fn().mockResolvedValue({ data: [] }),
+          listCommits: vi.fn().mockResolvedValue({ data: [] }),
+          listReviewComments: vi.fn().mockResolvedValue({ data: [] }),
+        },
+        checks: {
+          listForRef: vi.fn().mockResolvedValue({
+            data: { total_count: 0, check_runs: [] },
+          }),
         },
       },
       paginate: {
@@ -747,7 +771,13 @@ describe("Queen Bot", () => {
         })),
       },
       graphql: vi.fn().mockResolvedValue({
-        resource: { closingIssuesReferences: { nodes: [] } },
+        repository: {
+          pullRequest: {
+            closingIssuesReferences: {
+              nodes: [],
+            },
+          },
+        },
       }),
     });
 
@@ -883,6 +913,225 @@ describe("Queen Bot", () => {
       // Command was dispatched — graphql (getLinkedIssues) should NOT have been called
       // because the handler returns early after command execution
       expect(octokit.graphql).not.toHaveBeenCalled();
+    });
+
+    it("should return early for /doctor without processing PR intake", async () => {
+      const { handlers } = createWebhookHarness();
+      const handler = handlers.get("issue_comment.created")!;
+      const octokit = createCommandOctokit();
+      const log = { info: vi.fn(), error: vi.fn(), warn: vi.fn() };
+
+      await handler({
+        octokit,
+        log,
+        payload: {
+          issue: {
+            number: 10,
+            labels: [{ name: LABELS.DISCUSSION }],
+            pull_request: { url: "https://api.github.com/repos/hivemoot/test-repo/pulls/10" },
+          },
+          comment: {
+            id: 200,
+            body: "@hivemoot /doctor",
+            user: { login: "maintainer" },
+            performed_via_github_app: null,
+          },
+          repository: {
+            name: "test-repo",
+            full_name: "hivemoot/test-repo",
+            owner: { login: "hivemoot" },
+          },
+        },
+      });
+
+      expect(octokit.graphql).not.toHaveBeenCalled();
+    });
+
+    it("should ignore non-command comments on issues (non-PR)", async () => {
+      const { handlers } = createWebhookHarness();
+      const handler = handlers.get("issue_comment.created")!;
+      const octokit = createCommandOctokit();
+      const log = { info: vi.fn(), error: vi.fn(), warn: vi.fn() };
+
+      await handler({
+        octokit,
+        log,
+        payload: {
+          issue: {
+            number: 11,
+            labels: [{ name: LABELS.DISCUSSION }],
+          },
+          comment: {
+            id: 201,
+            body: "This needs more details before we vote.",
+            user: { login: "maintainer" },
+            performed_via_github_app: null,
+          },
+          repository: {
+            name: "test-repo",
+            full_name: "hivemoot/test-repo",
+            owner: { login: "hivemoot" },
+          },
+        },
+      });
+
+      expect(octokit.graphql).not.toHaveBeenCalled();
+      expect(octokit.rest.repos.getContent).not.toHaveBeenCalled();
+    });
+
+    it("should process non-command comments on PRs through intake path", async () => {
+      const { handlers } = createWebhookHarness();
+      const handler = handlers.get("issue_comment.created")!;
+      const octokit = createCommandOctokit();
+      const log = { info: vi.fn(), error: vi.fn(), warn: vi.fn() };
+
+      await handler({
+        octokit,
+        log,
+        payload: {
+          issue: {
+            number: 12,
+            labels: [{ name: LABELS.DISCUSSION }],
+            pull_request: { url: "https://api.github.com/repos/hivemoot/test-repo/pulls/12" },
+          },
+          comment: {
+            id: 202,
+            body: "Please take another look at this.",
+            user: { login: "maintainer" },
+            performed_via_github_app: null,
+          },
+          repository: {
+            name: "test-repo",
+            full_name: "hivemoot/test-repo",
+            owner: { login: "hivemoot" },
+          },
+        },
+      });
+
+      expect(processImplementationIntake).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("issues.opened handler", () => {
+    const createIssuesOpenedOctokit = (discussionExitType: "manual" | "auto" = "manual") => {
+      const configYml = discussionExitType === "auto"
+        ? "version: 1\ngovernance:\n  proposals:\n    discussion:\n      exits:\n        - type: auto\n          afterMinutes: 30\n"
+        : "";
+
+      return {
+        rest: {
+          repos: {
+            getContent: vi.fn().mockImplementation(async () => {
+              if (discussionExitType === "manual") {
+                throw { status: 404 };
+              }
+              return {
+                data: {
+                  type: "file",
+                  content: Buffer.from(configYml, "utf-8").toString("base64"),
+                },
+              };
+            }),
+          },
+          issues: {
+            get: vi.fn().mockResolvedValue({ data: { reactions: { "+1": 0, "-1": 0, confused: 0 } } }),
+            addLabels: vi.fn().mockResolvedValue({}),
+            removeLabel: vi.fn().mockResolvedValue({}),
+            createComment: vi.fn().mockResolvedValue({}),
+            update: vi.fn().mockResolvedValue({}),
+            lock: vi.fn().mockResolvedValue({}),
+            unlock: vi.fn().mockResolvedValue({}),
+            listComments: vi.fn().mockResolvedValue({ data: [] }),
+            listEventsForTimeline: vi.fn().mockResolvedValue({ data: [] }),
+          },
+          reactions: {
+            listForIssueComment: vi.fn().mockResolvedValue({ data: [] }),
+            listForIssue: vi.fn().mockResolvedValue({ data: [] }),
+          },
+        },
+        paginate: {
+          iterator: vi.fn().mockImplementation(() => ({
+            async *[Symbol.asyncIterator]() {
+              yield { data: [] };
+            },
+          })),
+        },
+      };
+    };
+
+    it("should use manual welcome when discussion auto-exit is not configured", async () => {
+      vi.mocked(loadRepositoryConfig).mockResolvedValueOnce({
+        governance: {
+          proposals: {
+            discussion: { exits: [{ type: "manual" }], durationMs: 0 },
+            voting: { exits: [{ type: "manual" }], durationMs: 0 },
+            extendedVoting: { exits: [{ type: "manual" }], durationMs: 0 },
+          },
+          pr: { staleDays: 14, maxPRsPerIssue: 3, trustedReviewers: [], intake: [{ method: "update" }], mergeReady: null },
+        },
+        version: 1,
+        standup: { enabled: false, category: "" },
+      });
+
+      const { handlers } = createWebhookHarness();
+      const handler = handlers.get("issues.opened")!;
+      const octokit = createIssuesOpenedOctokit("manual");
+      const log = { info: vi.fn(), error: vi.fn(), warn: vi.fn() };
+
+      await handler({
+        octokit,
+        log,
+        payload: {
+          issue: { number: 42 },
+          repository: {
+            name: "test-repo",
+            full_name: "hivemoot/test-repo",
+            owner: { login: "hivemoot" },
+          },
+        },
+      });
+
+      const commentBody = octokit.rest.issues.createComment.mock.calls[0][0].body;
+      expect(commentBody).toContain("Nothing moves forward automatically here.");
+    });
+
+    it("should use voting-focused welcome when discussion auto-exit is configured", async () => {
+      vi.mocked(loadRepositoryConfig).mockResolvedValueOnce({
+        governance: {
+          proposals: {
+            discussion: {
+              exits: [{ type: "auto", afterMs: 1_800_000, minReady: 0, requiredReady: { minCount: 0, users: [] } }],
+              durationMs: 1_800_000,
+            },
+            voting: { exits: [{ type: "manual" }], durationMs: 0 },
+            extendedVoting: { exits: [{ type: "manual" }], durationMs: 0 },
+          },
+          pr: { staleDays: 14, maxPRsPerIssue: 3, trustedReviewers: [], intake: [{ method: "update" }], mergeReady: null },
+        },
+        version: 1,
+        standup: { enabled: false, category: "" },
+      });
+
+      const { handlers } = createWebhookHarness();
+      const handler = handlers.get("issues.opened")!;
+      const octokit = createIssuesOpenedOctokit("auto");
+      const log = { info: vi.fn(), error: vi.fn(), warn: vi.fn() };
+
+      await handler({
+        octokit,
+        log,
+        payload: {
+          issue: { number: 43 },
+          repository: {
+            name: "test-repo",
+            full_name: "hivemoot/test-repo",
+            owner: { login: "hivemoot" },
+          },
+        },
+      });
+
+      const commentBody = octokit.rest.issues.createComment.mock.calls[0][0].body;
+      expect(commentBody).toContain("Ready to vote?");
     });
   });
 
@@ -1114,6 +1363,124 @@ describe("Queen Bot", () => {
     });
   });
 
+  describe("pull_request.closed handler", () => {
+    const createClosedPROctokit = () => ({
+      rest: {
+        pulls: {
+          get: vi.fn().mockResolvedValue({
+            data: {
+              number: 1,
+              state: "open",
+              merged: false,
+              created_at: "2026-01-01T00:00:00Z",
+              updated_at: "2026-01-01T00:00:00Z",
+              user: { login: "author" },
+              head: { sha: "abc123" },
+              mergeable: true,
+            },
+          }),
+          update: vi.fn().mockResolvedValue({}),
+          listReviews: vi.fn().mockResolvedValue({ data: [] }),
+          listCommits: vi.fn().mockResolvedValue({ data: [] }),
+          listReviewComments: vi.fn().mockResolvedValue({ data: [] }),
+        },
+        issues: {
+          get: vi.fn().mockResolvedValue({ data: { labels: [] } }),
+          addLabels: vi.fn().mockResolvedValue({}),
+          removeLabel: vi.fn().mockResolvedValue({}),
+          createComment: vi.fn().mockResolvedValue({}),
+          update: vi.fn().mockResolvedValue({}),
+          listForRepo: vi.fn().mockResolvedValue({ data: [] }),
+          listEventsForTimeline: vi.fn().mockResolvedValue({ data: [] }),
+          listComments: vi.fn().mockResolvedValue({ data: [] }),
+          lock: vi.fn().mockResolvedValue({}),
+          unlock: vi.fn().mockResolvedValue({}),
+        },
+        checks: {
+          listForRef: vi.fn().mockResolvedValue({ data: { total_count: 0, check_runs: [] } }),
+        },
+        repos: {
+          getCombinedStatusForRef: vi.fn().mockResolvedValue({
+            data: {
+              state: "success",
+              total_count: 0,
+              statuses: [],
+            },
+          }),
+        },
+        reactions: {
+          listForIssueComment: vi.fn().mockResolvedValue({ data: [] }),
+          listForIssue: vi.fn().mockResolvedValue({ data: [] }),
+        },
+      },
+      paginate: {
+        iterator: vi.fn().mockImplementation(() => ({
+          async *[Symbol.asyncIterator]() {
+            yield { data: [] };
+          },
+        })),
+      },
+    });
+
+    beforeEach(() => {
+      vi.mocked(getLinkedIssues).mockReset();
+      vi.mocked(getOpenPRsForIssue).mockReset();
+    });
+
+    it("should close competing PR before posting superseded comment", async () => {
+      const { handlers } = createWebhookHarness();
+      const handler = handlers.get("pull_request.closed");
+      expect(handler).toBeDefined();
+
+      const octokit = createClosedPROctokit();
+      const log = { info: vi.fn(), error: vi.fn() };
+
+      vi.mocked(getLinkedIssues).mockResolvedValueOnce([
+        {
+          number: 79,
+          title: "coverage gap",
+          state: "OPEN",
+          labels: { nodes: [{ name: LABELS.READY_TO_IMPLEMENT }] },
+        },
+      ] as any);
+      vi.mocked(getOpenPRsForIssue).mockResolvedValueOnce([
+        { number: 22, state: "OPEN", title: "winner" },
+        { number: 24, state: "OPEN", title: "competing" },
+      ] as any);
+
+      await handler!({
+        octokit,
+        log,
+        payload: {
+          pull_request: { number: 22, merged: true },
+          repository: {
+            name: "test-repo",
+            full_name: "hivemoot/test-repo",
+            owner: { login: "hivemoot" },
+          },
+        },
+      });
+
+      expect(octokit.rest.pulls.update).toHaveBeenCalledWith(
+        expect.objectContaining({ pull_number: 24, state: "closed" })
+      );
+
+      const supersededCommentCall = octokit.rest.issues.createComment.mock.calls.find(
+        (call: [{ issue_number: number; body: string }]) =>
+          call[0].issue_number === 24 && call[0].body.includes("Superseded")
+      );
+      expect(supersededCommentCall).toBeDefined();
+
+      const closeCallOrder = octokit.rest.pulls.update.mock.invocationCallOrder[0];
+      const supersededCallOrder = supersededCommentCall
+        ? octokit.rest.issues.createComment.mock.invocationCallOrder[
+            octokit.rest.issues.createComment.mock.calls.indexOf(supersededCommentCall as never)
+          ]
+        : Number.MAX_SAFE_INTEGER;
+      expect(closeCallOrder).toBeLessThan(supersededCallOrder);
+    });
+  });
+
   describe("Health Check Endpoint", () => {
     const originalEnv = process.env;
 
@@ -1162,6 +1529,397 @@ describe("Queen Bot", () => {
       const missing = requiredVars.filter((v) => !process.env[v]);
 
       expect(missing).toEqual(["APP_ID", "PRIVATE_KEY", "WEBHOOK_SECRET"]);
+    });
+  });
+
+  describe("PR workflow guards (pr: null config)", () => {
+    const createPRGuardOctokit = () => ({
+      rest: {
+        pulls: {
+          get: vi.fn().mockResolvedValue({ data: { number: 1, state: "open", merged: false, user: { login: "author" }, head: { sha: "abc123" } } }),
+          update: vi.fn().mockResolvedValue({}),
+          listReviews: vi.fn().mockResolvedValue({ data: [] }),
+          listCommits: vi.fn().mockResolvedValue({ data: [] }),
+          listReviewComments: vi.fn().mockResolvedValue({ data: [] }),
+          list: vi.fn().mockResolvedValue({ data: [] }),
+        },
+        issues: {
+          get: vi.fn().mockResolvedValue({ data: {} }),
+          addLabels: vi.fn().mockResolvedValue({}),
+          removeLabel: vi.fn().mockResolvedValue({}),
+          createComment: vi.fn().mockResolvedValue({}),
+          update: vi.fn().mockResolvedValue({}),
+          listForRepo: vi.fn().mockResolvedValue({ data: [] }),
+          listEventsForTimeline: vi.fn().mockResolvedValue({ data: [] }),
+          listComments: vi.fn().mockResolvedValue({ data: [] }),
+          lock: vi.fn().mockResolvedValue({}),
+          unlock: vi.fn().mockResolvedValue({}),
+        },
+        checks: {
+          listForRef: vi.fn().mockResolvedValue({ data: { total_count: 0, check_runs: [] } }),
+        },
+        repos: {
+          getCombinedStatusForRef: vi.fn().mockResolvedValue({ data: { state: "success", total_count: 0, statuses: [] } }),
+        },
+        reactions: {
+          listForIssueComment: vi.fn().mockResolvedValue({ data: [] }),
+          listForIssue: vi.fn().mockResolvedValue({ data: [] }),
+        },
+      },
+      paginate: {
+        iterator: vi.fn().mockImplementation(() => ({
+          async *[Symbol.asyncIterator]() { yield { data: [] }; },
+        })),
+      },
+    });
+
+    const nullPrConfig = {
+      governance: {
+        proposals: { discussion: { exits: [{ type: "manual" }], durationMs: 0 } },
+        pr: null,
+      },
+    };
+
+    const testRepo = {
+      name: "test-repo",
+      full_name: "hivemoot/test-repo",
+      owner: { login: "hivemoot" },
+      default_branch: "main",
+    };
+
+    const mkLog = () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() });
+
+    beforeEach(() => {
+      vi.mocked(processImplementationIntake).mockReset();
+      vi.mocked(recalculateLeaderboardForPR).mockReset();
+      vi.mocked(evaluateMergeReadiness).mockReset();
+      vi.mocked(getLinkedIssues).mockReset();
+      vi.mocked(loadRepositoryConfig).mockReset();
+    });
+
+    it("should skip intake on pull_request.opened when pr config is null", async () => {
+      const { handlers } = createWebhookHarness();
+      vi.mocked(getLinkedIssues).mockResolvedValue([
+        { number: 1, title: "issue", state: "OPEN", labels: { nodes: [] } },
+      ] as any);
+      vi.mocked(loadRepositoryConfig).mockResolvedValue(nullPrConfig as any);
+
+      await handlers.get("pull_request.opened")!({
+        octokit: createPRGuardOctokit(),
+        log: mkLog(),
+        payload: {
+          pull_request: { number: 1, body: "", base: { ref: "main" } },
+          repository: testRepo,
+        },
+      });
+
+      expect(processImplementationIntake).not.toHaveBeenCalled();
+    });
+
+    it("should skip intake on pull_request.synchronize when pr config is null", async () => {
+      const { handlers } = createWebhookHarness();
+      vi.mocked(getLinkedIssues).mockResolvedValue([]);
+      vi.mocked(loadRepositoryConfig).mockResolvedValue(nullPrConfig as any);
+
+      await handlers.get("pull_request.synchronize")!({
+        octokit: createPRGuardOctokit(),
+        log: mkLog(),
+        payload: {
+          pull_request: { number: 1, base: { ref: "main" } },
+          repository: testRepo,
+        },
+      });
+
+      expect(processImplementationIntake).not.toHaveBeenCalled();
+    });
+
+    it("should skip intake on pull_request.edited when pr config is null", async () => {
+      const { handlers } = createWebhookHarness();
+      vi.mocked(getLinkedIssues).mockResolvedValue([]);
+      vi.mocked(loadRepositoryConfig).mockResolvedValue(nullPrConfig as any);
+
+      await handlers.get("pull_request.edited")!({
+        octokit: createPRGuardOctokit(),
+        log: mkLog(),
+        payload: {
+          changes: { body: { from: "old" } },
+          pull_request: { number: 1, base: { ref: "main" }, updated_at: "2026-01-01T00:00:00Z" },
+          repository: testRepo,
+        },
+      });
+
+      expect(processImplementationIntake).not.toHaveBeenCalled();
+    });
+
+    it("should skip intake on issue_comment.created for non-command PR comment when pr config is null", async () => {
+      const { handlers } = createWebhookHarness();
+      vi.mocked(getLinkedIssues).mockResolvedValue([]);
+      vi.mocked(loadRepositoryConfig).mockResolvedValue(nullPrConfig as any);
+
+      await handlers.get("issue_comment.created")!({
+        octokit: createPRGuardOctokit(),
+        log: mkLog(),
+        payload: {
+          issue: {
+            number: 1,
+            labels: [],
+            pull_request: { url: "https://api.github.com/repos/hivemoot/test-repo/pulls/1" },
+          },
+          comment: { id: 100, body: "LGTM", user: { login: "reviewer" }, performed_via_github_app: null },
+          repository: testRepo,
+        },
+      });
+
+      expect(processImplementationIntake).not.toHaveBeenCalled();
+    });
+
+    it("should skip intake and merge-readiness on pull_request_review.submitted when pr config is null", async () => {
+      const { handlers } = createWebhookHarness();
+      vi.mocked(getLinkedIssues).mockResolvedValue([]);
+      vi.mocked(loadRepositoryConfig).mockResolvedValue(nullPrConfig as any);
+
+      await handlers.get("pull_request_review.submitted")!({
+        octokit: createPRGuardOctokit(),
+        log: mkLog(),
+        payload: {
+          review: { state: "approved" },
+          pull_request: { number: 1 },
+          repository: testRepo,
+        },
+      });
+
+      expect(processImplementationIntake).not.toHaveBeenCalled();
+      expect(evaluateMergeReadiness).not.toHaveBeenCalled();
+    });
+
+    it("should skip merge-readiness on pull_request_review.dismissed when pr config is null", async () => {
+      const { handlers } = createWebhookHarness();
+      vi.mocked(loadRepositoryConfig).mockResolvedValue(nullPrConfig as any);
+
+      await handlers.get("pull_request_review.dismissed")!({
+        octokit: createPRGuardOctokit(),
+        log: mkLog(),
+        payload: {
+          review: { state: "dismissed" },
+          pull_request: { number: 1 },
+          repository: testRepo,
+        },
+      });
+
+      expect(evaluateMergeReadiness).not.toHaveBeenCalled();
+    });
+
+    it("should skip merge-readiness on pull_request.labeled when pr config is null", async () => {
+      const { handlers } = createWebhookHarness();
+      vi.mocked(loadRepositoryConfig).mockResolvedValue(nullPrConfig as any);
+
+      await handlers.get("pull_request.labeled")!({
+        octokit: createPRGuardOctokit(),
+        log: mkLog(),
+        payload: {
+          label: { name: LABELS.IMPLEMENTATION },
+          pull_request: { number: 1, labels: [] },
+          repository: testRepo,
+        },
+      });
+
+      expect(evaluateMergeReadiness).not.toHaveBeenCalled();
+    });
+
+    it("should skip merge-readiness on check_suite.completed when pr config is null", async () => {
+      const { handlers } = createWebhookHarness();
+      vi.mocked(loadRepositoryConfig).mockResolvedValue(nullPrConfig as any);
+
+      await handlers.get("check_suite.completed")!({
+        octokit: createPRGuardOctokit(),
+        log: mkLog(),
+        payload: {
+          check_suite: { pull_requests: [{ number: 1 }], head_sha: "abc123" },
+          repository: testRepo,
+        },
+      });
+
+      expect(evaluateMergeReadiness).not.toHaveBeenCalled();
+    });
+
+    it("should skip merge-readiness on check_run.completed when pr config is null", async () => {
+      const { handlers } = createWebhookHarness();
+      vi.mocked(loadRepositoryConfig).mockResolvedValue(nullPrConfig as any);
+
+      await handlers.get("check_run.completed")!({
+        octokit: createPRGuardOctokit(),
+        log: mkLog(),
+        payload: {
+          check_run: { pull_requests: [{ number: 1 }], head_sha: "abc123" },
+          repository: testRepo,
+        },
+      });
+
+      expect(evaluateMergeReadiness).not.toHaveBeenCalled();
+    });
+
+    it("should skip merge-readiness on status event when pr config is null", async () => {
+      const { handlers } = createWebhookHarness();
+      vi.mocked(loadRepositoryConfig).mockResolvedValue(nullPrConfig as any);
+
+      await handlers.get("status")!({
+        octokit: createPRGuardOctokit(),
+        log: mkLog(),
+        payload: {
+          sha: "abc123",
+          repository: testRepo,
+        },
+      });
+
+      expect(evaluateMergeReadiness).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("PR workflow truthy paths (pr config present)", () => {
+    // These tests cover the body inside `if (repoConfig.governance.pr)` guards
+    // for handlers that had no prior truthy-path tests.
+    const mkOctokit = () => ({
+      rest: {
+        pulls: {
+          get: vi.fn().mockResolvedValue({ data: { number: 1, state: "open", merged: false, user: { login: "author" }, head: { sha: "abc123" } } }),
+          update: vi.fn().mockResolvedValue({}),
+          listReviews: vi.fn().mockResolvedValue({ data: [] }),
+          listCommits: vi.fn().mockResolvedValue({ data: [] }),
+          listReviewComments: vi.fn().mockResolvedValue({ data: [] }),
+          list: vi.fn().mockResolvedValue({ data: [] }),
+        },
+        issues: {
+          get: vi.fn().mockResolvedValue({ data: {} }),
+          addLabels: vi.fn().mockResolvedValue({}),
+          removeLabel: vi.fn().mockResolvedValue({}),
+          createComment: vi.fn().mockResolvedValue({}),
+          update: vi.fn().mockResolvedValue({}),
+          listForRepo: vi.fn().mockResolvedValue({ data: [] }),
+          listEventsForTimeline: vi.fn().mockResolvedValue({ data: [] }),
+          listComments: vi.fn().mockResolvedValue({ data: [] }),
+          lock: vi.fn().mockResolvedValue({}),
+          unlock: vi.fn().mockResolvedValue({}),
+        },
+        checks: {
+          listForRef: vi.fn().mockResolvedValue({ data: { total_count: 0, check_runs: [] } }),
+        },
+        repos: {
+          getCombinedStatusForRef: vi.fn().mockResolvedValue({ data: { state: "success", total_count: 0, statuses: [] } }),
+        },
+        reactions: {
+          listForIssueComment: vi.fn().mockResolvedValue({ data: [] }),
+          listForIssue: vi.fn().mockResolvedValue({ data: [] }),
+        },
+      },
+      paginate: {
+        iterator: vi.fn().mockImplementation(() => ({
+          async *[Symbol.asyncIterator]() { yield { data: [] }; },
+        })),
+      },
+    });
+
+    const prConfig = {
+      governance: {
+        proposals: { discussion: { exits: [{ type: "manual" }], durationMs: 0 } },
+        pr: { maxPRsPerIssue: 3, trustedReviewers: [], intake: {}, mergeReady: {} },
+      },
+    };
+
+    const testRepo = {
+      name: "test-repo",
+      full_name: "hivemoot/test-repo",
+      owner: { login: "hivemoot" },
+      default_branch: "main",
+    };
+
+    const mkLog = () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn() });
+
+    beforeEach(() => {
+      vi.mocked(processImplementationIntake).mockReset();
+      vi.mocked(evaluateMergeReadiness).mockReset();
+      vi.mocked(getLinkedIssues).mockReset();
+      vi.mocked(loadRepositoryConfig).mockReset();
+    });
+
+    it("should call processImplementationIntake on pull_request.opened", async () => {
+      const { handlers } = createWebhookHarness();
+      vi.mocked(getLinkedIssues).mockResolvedValue([
+        { number: 1, title: "issue", state: "OPEN", labels: { nodes: [] } },
+      ] as any);
+      vi.mocked(loadRepositoryConfig).mockResolvedValue(prConfig as any);
+
+      await handlers.get("pull_request.opened")!({
+        octokit: mkOctokit(),
+        log: mkLog(),
+        payload: {
+          pull_request: { number: 1, body: "Closes #1", base: { ref: "main" } },
+          repository: testRepo,
+        },
+      });
+
+      expect(processImplementationIntake).toHaveBeenCalledWith(
+        expect.objectContaining({ trigger: "opened" })
+      );
+    });
+
+    it("should call processImplementationIntake on pull_request.synchronize", async () => {
+      const { handlers } = createWebhookHarness();
+      vi.mocked(getLinkedIssues).mockResolvedValue([]);
+      vi.mocked(loadRepositoryConfig).mockResolvedValue(prConfig as any);
+
+      await handlers.get("pull_request.synchronize")!({
+        octokit: mkOctokit(),
+        log: mkLog(),
+        payload: {
+          pull_request: { number: 1, base: { ref: "main" } },
+          repository: testRepo,
+        },
+      });
+
+      expect(processImplementationIntake).toHaveBeenCalledWith(
+        expect.objectContaining({ trigger: "updated" })
+      );
+    });
+
+    it("should call processImplementationIntake on pull_request.edited", async () => {
+      const { handlers } = createWebhookHarness();
+      vi.mocked(getLinkedIssues).mockResolvedValue([]);
+      vi.mocked(loadRepositoryConfig).mockResolvedValue(prConfig as any);
+
+      await handlers.get("pull_request.edited")!({
+        octokit: mkOctokit(),
+        log: mkLog(),
+        payload: {
+          changes: { body: { from: "old" } },
+          pull_request: { number: 1, base: { ref: "main" }, updated_at: "2026-01-01T00:00:00Z" },
+          repository: testRepo,
+        },
+      });
+
+      expect(processImplementationIntake).toHaveBeenCalledWith(
+        expect.objectContaining({ trigger: "edited" })
+      );
+    });
+
+    it("should call evaluateMergeReadiness on pull_request.labeled", async () => {
+      const { handlers } = createWebhookHarness();
+      vi.mocked(loadRepositoryConfig).mockResolvedValue(prConfig as any);
+
+      await handlers.get("pull_request.labeled")!({
+        octokit: mkOctokit(),
+        log: mkLog(),
+        payload: {
+          label: { name: LABELS.IMPLEMENTATION },
+          pull_request: { number: 1, labels: [{ name: LABELS.IMPLEMENTATION }] },
+          repository: testRepo,
+        },
+      });
+
+      expect(evaluateMergeReadiness).toHaveBeenCalledWith(
+        expect.objectContaining({
+          currentLabels: [LABELS.IMPLEMENTATION],
+        })
+      );
     });
   });
 

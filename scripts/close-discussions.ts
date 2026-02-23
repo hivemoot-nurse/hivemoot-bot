@@ -41,6 +41,7 @@ import type {
 } from "../api/lib/index.js";
 import type { IssueOperations } from "../api/lib/github-client.js";
 import type { GovernanceService } from "../api/lib/governance.js";
+import type { InstallationContext } from "./shared/run-installations.js";
 
 /**
  * Represents an issue that was skipped due to missing voting comment.
@@ -59,6 +60,17 @@ interface AccessIssue {
   issueNumber: number;
   status?: number;
   reason: AccessIssueReason;
+}
+
+function createIssueRef(
+  owner: string,
+  repoName: string,
+  issueNumber: number,
+  installationId?: number
+): IssueRef {
+  return installationId !== undefined
+    ? { owner, repo: repoName, issueNumber, installationId }
+    : { owner, repo: repoName, issueNumber };
 }
 
 /**
@@ -443,17 +455,20 @@ export async function processIssuePhase(
 // ───────────────────────────────────────────────────────────────────────────────
 
 /**
- * Notify existing PRs that a linked issue has passed voting.
+ * Notify existing PRs that a linked issue is ready to implement.
  *
  * Intentionally notification-only — does NOT auto-tag PRs with the
  * `implementation` label. PR authors must push a new commit after
- * voting passes to activate their PR. This prevents gaming where an
+ * an issue becomes ready to implement to activate their PR. This prevents gaming where an
  * agent pre-creates an empty PR during discussion/voting to auto-claim
  * an implementation slot when voting passes.
  *
  * The activation date guard (isActivationAfterReady) in the webhook
  * handler enforces this: PR activity must occur after the ready label
- * was added. See processImplementationIntake in api/github/webhooks/index.ts.
+ * was added. See processImplementationIntake in api/lib/implementation-intake.ts.
+ *
+ * This behavior is configurable via the `intake` config. With `method: "auto"`,
+ * pre-ready PRs are unconditionally activated (bypassing the timing guard).
  */
 export async function notifyPendingPRs(
   octokit: InstanceType<typeof Octokit>,
@@ -499,7 +514,7 @@ export async function notifyPendingPRs(
 
       await prs.comment(
         ref,
-        PR_MESSAGES.issueVotingPassed(issueNumber, linkedPR.author.login)
+        PR_MESSAGES.issueReadyToImplement(issueNumber, linkedPR.author.login)
       );
       logger.info(`Notified PR #${linkedPR.number} (@${linkedPR.author.login}) that issue #${issueNumber} is ready`);
 
@@ -558,6 +573,7 @@ export async function reconcileMissingVotingComments(
   owner: string,
   repoName: string,
   governance: GovernanceService,
+  installationId?: number,
 ): Promise<number> {
   let reconciledCount = 0;
   const seen = new Set<number>();
@@ -573,7 +589,7 @@ export async function reconcileMissingVotingComments(
         if ('pull_request' in issue) continue;
         if (seen.has(issue.number)) continue;
         seen.add(issue.number);
-        const ref: IssueRef = { owner, repo: repoName, issueNumber: issue.number };
+        const ref = createIssueRef(owner, repoName, issue.number, installationId);
         try {
           const result = await governance.postVotingComment(ref);
           if (result === "posted") {
@@ -585,6 +601,60 @@ export async function reconcileMissingVotingComments(
             `[${owner}/${repoName}] Failed to reconcile #${issue.number}: ${(error as Error).message}`,
           );
         }
+      }
+    }
+  }
+  return reconciledCount;
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Unlabeled Issue Reconciliation
+// ───────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Reconcile open issues that have no hivemoot:* phase label.
+ *
+ * These issues missed the issues.opened webhook (e.g., during a bot outage)
+ * and were never bootstrapped into the discussion phase. This function finds
+ * them and calls startDiscussion() to apply hivemoot:discussion and post the
+ * welcome comment.
+ *
+ * Idempotent: once startDiscussion succeeds, the issue gains the
+ * hivemoot:discussion label and is skipped on the next run. Errors on
+ * individual issues are logged but do not abort the loop.
+ *
+ * @returns Number of issues that were reconciled
+ */
+export async function reconcileUnlabeledIssues(
+  octokit: InstanceType<typeof Octokit>,
+  owner: string,
+  repoName: string,
+  governance: GovernanceService,
+  installationId?: number,
+): Promise<number> {
+  let reconciledCount = 0;
+
+  const iterator = octokit.paginate.iterator(
+    octokit.rest.issues.listForRepo,
+    { owner, repo: repoName, state: "open", per_page: 100 },
+  );
+
+  for await (const { data: page } of iterator) {
+    for (const issue of page as Issue[]) {
+      if ('pull_request' in issue) continue;
+
+      // Skip issues that already have any hivemoot:* label
+      if (issue.labels.some((l) => l.name.startsWith('hivemoot:'))) continue;
+
+      const ref = createIssueRef(owner, repoName, issue.number, installationId);
+      try {
+        await governance.startDiscussion(ref);
+        reconciledCount++;
+        logger.info(`[${owner}/${repoName}] Reconciled unlabeled issue #${issue.number}`);
+      } catch (error) {
+        logger.warn(
+          `[${owner}/${repoName}] Failed to reconcile unlabeled issue #${issue.number}: ${(error as Error).message}`,
+        );
       }
     }
   }
@@ -618,6 +688,7 @@ async function processPhaseIssues(
   octokit: InstanceType<typeof Octokit>,
   owner: string,
   repoName: string,
+  installationId: number | undefined,
   issues: IssueOperations,
   governance: GovernanceService,
   phase: PhaseConfig,
@@ -644,7 +715,7 @@ async function processPhaseIssues(
         }
         if (seen.has(issue.number)) continue;
         seen.add(issue.number);
-        const ref: IssueRef = { owner, repo: repoName, issueNumber: issue.number };
+        const ref = createIssueRef(owner, repoName, issue.number, installationId);
         await processIssuePhase(
           issues,
           governance,
@@ -673,10 +744,12 @@ async function processPhaseIssues(
 export async function processRepository(
   octokit: InstanceType<typeof Octokit>,
   repo: Repository,
-  appId: number
+  appId: number,
+  installation?: InstallationContext
 ): Promise<{ skippedIssues: SkippedIssue[]; accessIssues: AccessIssue[] }> {
   const owner = repo.owner.login;
   const repoName = repo.name;
+  const installationId = installation?.installationId;
   const skippedIssues: SkippedIssue[] = [];
   const accessIssues: AccessIssue[] = [];
 
@@ -691,13 +764,36 @@ export async function processRepository(
     // ── Reconciliation (always runs, even for manual-only repos) ──
     // Best-effort: do not let reconciliation failures block phase transitions.
     try {
-      const reconciled = await reconcileMissingVotingComments(octokit, owner, repoName, governance);
+      const reconciled = await reconcileMissingVotingComments(
+        octokit,
+        owner,
+        repoName,
+        governance,
+        installationId
+      );
       if (reconciled > 0) {
         logger.info(`[${repo.full_name}] Reconciled ${reconciled} missing voting comment(s)`);
       }
     } catch (error) {
       logger.warn(
         `[${repo.full_name}] Reconciliation failed: ${(error as Error).message}. Continuing with phase transitions.`,
+      );
+    }
+
+    try {
+      const reconciled = await reconcileUnlabeledIssues(
+        octokit,
+        owner,
+        repoName,
+        governance,
+        installationId
+      );
+      if (reconciled > 0) {
+        logger.info(`[${repo.full_name}] Reconciled ${reconciled} unlabeled issue(s)`);
+      }
+    } catch (error) {
+      logger.warn(
+        `[${repo.full_name}] Unlabeled issue reconciliation failed: ${(error as Error).message}. Continuing with phase transitions.`,
       );
     }
 
@@ -724,8 +820,13 @@ export async function processRepository(
     };
 
     const { discussion, voting, extendedVoting } = repoConfig.governance.proposals;
-    const { trustedReviewers, intake, maxPRsPerIssue } = repoConfig.governance.pr;
-    const prIntakeConfig = { maxPRsPerIssue, trustedReviewers, intake };
+    const prIntakeConfig = repoConfig.governance.pr
+      ? {
+          maxPRsPerIssue: repoConfig.governance.pr.maxPRsPerIssue,
+          trustedReviewers: repoConfig.governance.pr.trustedReviewers,
+          intake: repoConfig.governance.pr.intake,
+        }
+      : undefined;
 
     // Voting/inconclusive phases share a transition pattern: end voting, track
     // outcome, and notify pending PRs if the proposal passed.
@@ -827,7 +928,7 @@ export async function processRepository(
 
     for (const phase of phases) {
       await processPhaseIssues(
-        octokit, owner, repoName, issues, governance, phase, trackAccessIssue
+        octokit, owner, repoName, installationId, issues, governance, phase, trackAccessIssue
       );
     }
 
