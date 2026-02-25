@@ -8,6 +8,7 @@
 
 import { REQUIRED_REPOSITORY_LABELS, type RepositoryLabelDefinition } from "../config.js";
 import { hasPaginateIterator, validateClient } from "./client-validation.js";
+import { getErrorStatus } from "./github-client.js";
 
 interface ExistingLabel {
   name: string;
@@ -141,7 +142,7 @@ export class RepositoryLabelService {
         created++;
       } catch (error) {
         // Label may have been created concurrently by another process
-        if ((error as { status?: number }).status === 422) {
+        if (getErrorStatus(error) === 422) {
           existingLabels.set(key, { name: label.name, color: label.color, description: label.description ?? null });
           skipped++;
           continue;
