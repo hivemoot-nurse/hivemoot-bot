@@ -565,6 +565,26 @@ describe("reconcile-pr-notifications", () => {
           per_page: 100,
         }
       );
+      expect(mockOctokit.paginate.iterator).toHaveBeenCalledWith(
+        mockOctokit.rest.issues.listForRepo,
+        {
+          owner,
+          repo,
+          state: "open",
+          labels: "ready-to-implement",
+          per_page: 100,
+        }
+      );
+      expect(mockOctokit.paginate.iterator).toHaveBeenCalledWith(
+        mockOctokit.rest.issues.listForRepo,
+        {
+          owner,
+          repo,
+          state: "open",
+          labels: "phase:ready-to-implement",
+          per_page: 100,
+        }
+      );
     });
 
     it("should skip items with pull_request property (PRs, not issues)", async () => {

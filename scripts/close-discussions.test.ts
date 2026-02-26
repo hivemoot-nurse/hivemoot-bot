@@ -292,6 +292,37 @@ describe("close-discussions script", () => {
         installationId: 999,
       });
     });
+
+    it("should reconcile legacy voting labels without duplicate processing", async () => {
+      const mockGovernance = {
+        postVotingComment: vi.fn().mockResolvedValue("posted"),
+      } as any;
+
+      const fakeOctokit = {
+        rest: { issues: { listForRepo: vi.fn() } },
+        paginate: {
+          iterator: vi
+            .fn()
+            .mockReturnValueOnce(buildIterator([[{ number: 10 }]]))
+            .mockReturnValueOnce(buildIterator([[{ number: 10 }, { number: 11 }]])),
+        },
+      } as any;
+
+      const count = await reconcileMissingVotingComments(fakeOctokit, owner, repoName, mockGovernance);
+
+      expect(count).toBe(2);
+      expect(mockGovernance.postVotingComment).toHaveBeenCalledTimes(2);
+      expect(mockGovernance.postVotingComment).toHaveBeenNthCalledWith(1, {
+        owner,
+        repo: repoName,
+        issueNumber: 10,
+      });
+      expect(mockGovernance.postVotingComment).toHaveBeenNthCalledWith(2, {
+        owner,
+        repo: repoName,
+        issueNumber: 11,
+      });
+    });
   });
 
   describe("reconcileUnlabeledIssues", () => {
@@ -335,6 +366,31 @@ describe("close-discussions script", () => {
             buildIterator([[
               { number: 10, labels: [{ name: "hivemoot:discussion" }] },
               { number: 20, labels: [{ name: "hivemoot:voting" }] },
+              { number: 30, labels: [] },
+            ]])
+          ),
+        },
+      } as any;
+
+      const count = await reconcileUnlabeledIssues(fakeOctokit, owner, repoName, mockGovernance);
+
+      expect(count).toBe(1);
+      expect(mockGovernance.startDiscussion).toHaveBeenCalledTimes(1);
+      expect(mockGovernance.startDiscussion).toHaveBeenCalledWith({ owner, repo: repoName, issueNumber: 30 });
+    });
+
+    it("should skip issues that already have any legacy governance label", async () => {
+      const mockGovernance = {
+        startDiscussion: vi.fn().mockResolvedValue(undefined),
+      } as any;
+
+      const fakeOctokit = {
+        rest: { issues: { listForRepo: vi.fn() } },
+        paginate: {
+          iterator: vi.fn().mockReturnValue(
+            buildIterator([[
+              { number: 10, labels: [{ name: "phase:discussion" }] },
+              { number: 20, labels: [{ name: "ready-to-implement" }] },
               { number: 30, labels: [] },
             ]])
           ),

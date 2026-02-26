@@ -34,6 +34,15 @@ import type { PROperations } from "../api/lib/pr-operations.js";
 import type { IssueOperations } from "../api/lib/github-client.js";
 import type { InstallationContext } from "./shared/run-installations.js";
 
+const LEGACY_LABEL_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  [LABELS.READY_TO_IMPLEMENT]: ["ready-to-implement", "phase:ready-to-implement"],
+  [LABELS.IMPLEMENTATION]: ["implementation"],
+};
+
+function getLabelAliases(label: string): readonly string[] {
+  return [label, ...(LEGACY_LABEL_ALIASES[label] ?? [])];
+}
+
 /**
  * Legacy/plaintext signatures for pre-metadata ready notifications.
  * Keep both old and new phrasing for backward compatibility in fallback detection.
@@ -123,8 +132,13 @@ export async function reconcileIssue(
   }
 
   // Build exclusion set: PRs already labeled as implementation don't need notification
-  const implementationPRs = await prs.findPRsWithLabel(owner, repo, LABELS.IMPLEMENTATION);
-  const implementationPRNumbers = new Set(implementationPRs.map((pr) => pr.number));
+  const implementationPRNumbers = new Set<number>();
+  for (const labelAlias of getLabelAliases(LABELS.IMPLEMENTATION)) {
+    const implementationPRs = await prs.findPRsWithLabel(owner, repo, labelAlias);
+    for (const pr of implementationPRs) {
+      implementationPRNumbers.add(pr.number);
+    }
+  }
 
   let notified = 0;
   let skipped = 0;
@@ -225,34 +239,38 @@ export async function processRepository(
     }
     const { maxPRsPerIssue, trustedReviewers, intake } = repoConfig.governance.pr;
 
-    // Paginate through all open issues with ready-to-implement label
+    // Paginate through all open issues with ready-to-implement label.
+    // Query canonical + legacy aliases to keep stale installs discoverable.
     const failedIssues: number[] = [];
+    const seenIssues = new Set<number>();
 
-    const readyIterator = octokit.paginate.iterator(
-      octokit.rest.issues.listForRepo,
-      {
-        owner,
-        repo: repoName,
-        state: "open",
-        labels: LABELS.READY_TO_IMPLEMENT,
-        per_page: 100,
-      }
-    );
-
-    for await (const { data: page } of readyIterator) {
-      const filteredIssues = (page as Array<{ number: number; pull_request?: unknown }>).filter(
-        (item) => !item.pull_request
+    for (const labelAlias of getLabelAliases(LABELS.READY_TO_IMPLEMENT)) {
+      const readyIterator = octokit.paginate.iterator(
+        octokit.rest.issues.listForRepo,
+        {
+          owner,
+          repo: repoName,
+          state: "open",
+          labels: labelAlias,
+          per_page: 100,
+        }
       );
 
-      for (const issue of filteredIssues) {
-        try {
-          const result = await reconcileIssue(octokit, prs, issues, owner, repoName, issue.number, maxPRsPerIssue, trustedReviewers, intake);
-          if (result.notified > 0) {
-            logger.info(`Issue #${issue.number}: notified ${result.notified} PR(s), skipped ${result.skipped}`);
+      for await (const { data: page } of readyIterator) {
+        for (const issue of page as Array<{ number: number; pull_request?: unknown }>) {
+          if (issue.pull_request || seenIssues.has(issue.number)) {
+            continue;
           }
-        } catch (error) {
-          failedIssues.push(issue.number);
-          logger.error(`Failed to reconcile issue #${issue.number}`, error as Error);
+          seenIssues.add(issue.number);
+          try {
+            const result = await reconcileIssue(octokit, prs, issues, owner, repoName, issue.number, maxPRsPerIssue, trustedReviewers, intake);
+            if (result.notified > 0) {
+              logger.info(`Issue #${issue.number}: notified ${result.notified} PR(s), skipped ${result.skipped}`);
+            }
+          } catch (error) {
+            failedIssues.push(issue.number);
+            logger.error(`Failed to reconcile issue #${issue.number}`, error as Error);
+          }
         }
       }
     }

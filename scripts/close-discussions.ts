@@ -62,6 +62,54 @@ interface AccessIssue {
   reason: AccessIssueReason;
 }
 
+const LEGACY_LABEL_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  [LABELS.DISCUSSION]: ["phase:discussion"],
+  [LABELS.VOTING]: ["phase:voting"],
+  [LABELS.EXTENDED_VOTING]: ["phase:extended-voting"],
+  [LABELS.READY_TO_IMPLEMENT]: ["ready-to-implement", "phase:ready-to-implement"],
+  [LABELS.REJECTED]: ["rejected"],
+  [LABELS.INCONCLUSIVE]: ["inconclusive"],
+  [LABELS.IMPLEMENTATION]: ["implementation"],
+  [LABELS.STALE]: ["stale"],
+  [LABELS.IMPLEMENTED]: ["implemented"],
+  [LABELS.NEEDS_HUMAN]: ["needs:human"],
+  [LABELS.MERGE_READY]: ["merge-ready"],
+};
+
+const ALL_GOVERNANCE_LABELS = new Set(
+  Object.entries(LEGACY_LABEL_ALIASES).flatMap(([canonical, aliases]) => [canonical, ...aliases])
+);
+
+function getLabelAliases(label: string): readonly string[] {
+  return [label, ...(LEGACY_LABEL_ALIASES[label] ?? [])];
+}
+
+async function *iterateOpenIssuesForLabelAliases(
+  octokit: InstanceType<typeof Octokit>,
+  owner: string,
+  repoName: string,
+  label: string
+): AsyncGenerator<Issue> {
+  const seenIssueNumbers = new Set<number>();
+
+  for (const labelAlias of getLabelAliases(label)) {
+    const iterator = octokit.paginate.iterator(
+      octokit.rest.issues.listForRepo,
+      { owner, repo: repoName, state: "open", labels: labelAlias, per_page: 100 },
+    );
+
+    for await (const { data: page } of iterator) {
+      for (const issue of page as Issue[]) {
+        if (seenIssueNumbers.has(issue.number)) {
+          continue;
+        }
+        seenIssueNumbers.add(issue.number);
+        yield issue;
+      }
+    }
+  }
+}
+
 function createIssueRef(
   owner: string,
   repoName: string,
@@ -577,26 +625,19 @@ export async function reconcileMissingVotingComments(
 ): Promise<number> {
   let reconciledCount = 0;
 
-  const iterator = octokit.paginate.iterator(
-    octokit.rest.issues.listForRepo,
-    { owner, repo: repoName, state: "open", labels: LABELS.VOTING, per_page: 100 },
-  );
-
-  for await (const { data: page } of iterator) {
-    for (const issue of page as Issue[]) {
-      if ('pull_request' in issue) continue;
-      const ref = createIssueRef(owner, repoName, issue.number, installationId);
-      try {
-        const result = await governance.postVotingComment(ref);
-        if (result === "posted") {
-          reconciledCount++;
-          logger.info(`[${owner}/${repoName}] Reconciled voting comment for #${issue.number}`);
-        }
-      } catch (error) {
-        logger.warn(
-          `[${owner}/${repoName}] Failed to reconcile #${issue.number}: ${(error as Error).message}`,
-        );
+  for await (const issue of iterateOpenIssuesForLabelAliases(octokit, owner, repoName, LABELS.VOTING)) {
+    if ('pull_request' in issue) continue;
+    const ref = createIssueRef(owner, repoName, issue.number, installationId);
+    try {
+      const result = await governance.postVotingComment(ref);
+      if (result === "posted") {
+        reconciledCount++;
+        logger.info(`[${owner}/${repoName}] Reconciled voting comment for #${issue.number}`);
       }
+    } catch (error) {
+      logger.warn(
+        `[${owner}/${repoName}] Failed to reconcile #${issue.number}: ${(error as Error).message}`,
+      );
     }
   }
   return reconciledCount;
@@ -638,8 +679,8 @@ export async function reconcileUnlabeledIssues(
     for (const issue of page as Issue[]) {
       if ('pull_request' in issue) continue;
 
-      // Skip issues that already have any hivemoot:* label
-      if (issue.labels.some((l) => l.name.startsWith('hivemoot:'))) continue;
+      // Skip issues that already have a canonical or legacy governance label.
+      if (issue.labels.some((l) => ALL_GOVERNANCE_LABELS.has(l.name))) continue;
 
       const ref = createIssueRef(owner, repoName, issue.number, installationId);
       try {
@@ -688,35 +729,22 @@ async function processPhaseIssues(
   phase: PhaseConfig,
   onAccessIssue: (ref: IssueRef, status: number | undefined, reason: AccessIssueReason) => void
 ): Promise<void> {
-  const iterator = octokit.paginate.iterator(
-    octokit.rest.issues.listForRepo,
-    {
-      owner,
-      repo: repoName,
-      state: "open",
-      labels: phase.label,
-      per_page: 100,
+  for await (const issue of iterateOpenIssuesForLabelAliases(octokit, owner, repoName, phase.label)) {
+    if ('pull_request' in issue) {
+      continue;
     }
-  );
-
-  for await (const { data: page } of iterator) {
-    for (const issue of page as Issue[]) {
-      if ('pull_request' in issue) {
-        continue;
-      }
-      const ref = createIssueRef(owner, repoName, issue.number, installationId);
-      await processIssuePhase(
-        issues,
-        governance,
-        ref,
-        phase.label,
-        phase.durationMs,
-        phase.phaseName,
-        () => phase.transition(governance, ref),
-        onAccessIssue,
-        phase.earlyCheck
-      );
-    }
+    const ref = createIssueRef(owner, repoName, issue.number, installationId);
+    await processIssuePhase(
+      issues,
+      governance,
+      ref,
+      phase.label,
+      phase.durationMs,
+      phase.phaseName,
+      () => phase.transition(governance, ref),
+      onAccessIssue,
+      phase.earlyCheck
+    );
   }
 }
 
