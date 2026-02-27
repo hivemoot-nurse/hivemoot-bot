@@ -1178,17 +1178,19 @@ function deriveVotingDurationMs(exits: VotingExit[]): number {
  */
 function parseRepoConfig(raw: unknown, repoFullName: string): EffectiveConfig {
   const config = raw as RepoConfigFile | undefined;
+  const governance =
+    config?.governance && typeof config.governance === "object" && !Array.isArray(config.governance)
+      ? config.governance
+      : undefined;
 
   // Discussion exits
-  const discussionExitsRaw = config?.governance?.proposals?.discussion?.exits;
+  const discussionExitsRaw = governance?.proposals?.discussion?.exits;
   const discussionExits = parseDiscussionExits(discussionExitsRaw, repoFullName);
 
   // PR workflows: opt-in — absent `pr:` section means all PR workflows disabled.
   // When the key is present (even as empty `pr: {}`), parse with defaults.
-  const prConfigRaw = config?.governance?.pr;
-  const hasPrSection = config?.governance !== undefined
-    && config?.governance !== null
-    && "pr" in (config.governance as object);
+  const prConfigRaw = governance?.pr;
+  const hasPrSection = governance !== undefined && "pr" in governance;
 
   let pr: PRConfig | null = null;
   if (hasPrSection) {
@@ -1207,10 +1209,10 @@ function parseRepoConfig(raw: unknown, repoFullName: string): EffectiveConfig {
   }
 
   // Voting exits
-  const exitsRaw = config?.governance?.proposals?.voting?.exits;
+  const exitsRaw = governance?.proposals?.voting?.exits;
   const exits = parseExits(exitsRaw, repoFullName);
   // Extended voting exits (independent defaults)
-  const extendedExitsRaw = config?.governance?.proposals?.extendedVoting?.exits;
+  const extendedExitsRaw = governance?.proposals?.extendedVoting?.exits;
   const extendedExits = parseExits(extendedExitsRaw, repoFullName);
 
   return {

@@ -1481,6 +1481,43 @@ governance:
         expect(config.governance.pr).toBeNull();
       });
 
+      it("should return pr: null when governance is a scalar", async () => {
+        const configYaml = `
+governance: 1
+`;
+        const octokit = createMockOctokit({
+          data: {
+            type: "file",
+            content: encodeBase64(configYaml),
+            encoding: "base64",
+          },
+        });
+
+        const config = await loadRepositoryConfig(octokit, "owner", "repo");
+
+        expect(config).toEqual(getDefaultConfig());
+        expect(config.governance.pr).toBeNull();
+      });
+
+      it("should return pr: null when governance is an array", async () => {
+        const configYaml = `
+governance:
+  - pr
+`;
+        const octokit = createMockOctokit({
+          data: {
+            type: "file",
+            content: encodeBase64(configYaml),
+            encoding: "base64",
+          },
+        });
+
+        const config = await loadRepositoryConfig(octokit, "owner", "repo");
+
+        expect(config).toEqual(getDefaultConfig());
+        expect(config.governance.pr).toBeNull();
+      });
+
       it("should return pr with defaults when pr: section is present but empty", async () => {
         const configYaml = `
 governance:
