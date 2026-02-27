@@ -9,7 +9,6 @@ import type { PRRef } from "./types.js";
 import { validateClient, PR_CLIENT_CHECKS } from "./client-validation.js";
 import { isNotificationComment } from "./bot-comments.js";
 import { LABELS } from "../config.js";
-import { getErrorStatus } from "./github-client.js";
 
 /**
  * Minimal GitHub client interface for PR operations.

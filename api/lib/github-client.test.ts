@@ -300,6 +300,16 @@ describe("IssueOperations", () => {
       await expect(issueOps.removeLabel(testRef, "hivemoot:voting")).resolves.toBeUndefined();
     });
 
+    it("should not attempt alias fallback when canonical label is missing", async () => {
+      const notFound = new Error("Not Found") as Error & { status: number };
+      notFound.status = 404;
+
+      vi.mocked(mockClient.rest.issues.removeLabel)
+        .mockRejectedValueOnce(notFound);
+
+      await expect(issueOps.removeLabel(testRef, "hivemoot:voting")).resolves.toBeUndefined();
+      expect(mockClient.rest.issues.removeLabel).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("comment", () => {
