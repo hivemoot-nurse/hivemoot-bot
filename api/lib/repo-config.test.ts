@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { loadRepositoryConfig, getDefaultConfig } from "./repo-config.js";
+import { logger } from "./logger.js";
 import {
   CONFIG_BOUNDS,
   MAX_PRS_PER_ISSUE,
@@ -89,6 +90,29 @@ describe("repo-config", () => {
   });
 
   describe("loadRepositoryConfig", () => {
+    it.each([
+      { name: "string", yamlValue: "\"not-an-object\"" },
+      { name: "number", yamlValue: "42" },
+      { name: "boolean", yamlValue: "true" },
+    ])("should treat non-object governance ($name) as absent without fallback warning", async ({ yamlValue }) => {
+      const warnSpy = vi.spyOn(logger, "warn");
+      const configYaml = `governance: ${yamlValue}\n`;
+      const octokit = createMockOctokit({
+        data: {
+          type: "file",
+          content: encodeBase64(configYaml),
+          encoding: "base64",
+        },
+      });
+
+      const config = await loadRepositoryConfig(octokit, "owner", "repo");
+
+      expect(config.governance.pr).toBeNull();
+      expect(warnSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining("Failed to load config")
+      );
+    });
+
     describe("new format config parsing", () => {
       it("should parse complete new format config with exits", async () => {
         const configYaml = `

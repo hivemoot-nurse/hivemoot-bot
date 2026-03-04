@@ -1178,6 +1178,7 @@ function deriveVotingDurationMs(exits: VotingExit[]): number {
  */
 function parseRepoConfig(raw: unknown, repoFullName: string): EffectiveConfig {
   const config = raw as RepoConfigFile | undefined;
+  const governance = config?.governance;
 
   // Discussion exits
   const discussionExitsRaw = config?.governance?.proposals?.discussion?.exits;
@@ -1186,9 +1187,10 @@ function parseRepoConfig(raw: unknown, repoFullName: string): EffectiveConfig {
   // PR workflows: opt-in — absent `pr:` section means all PR workflows disabled.
   // When the key is present (even as empty `pr: {}`), parse with defaults.
   const prConfigRaw = config?.governance?.pr;
-  const hasPrSection = config?.governance !== undefined
-    && config?.governance !== null
-    && "pr" in (config.governance as object);
+  const hasPrSection = typeof governance === "object"
+    && governance !== null
+    && !Array.isArray(governance)
+    && "pr" in governance;
 
   let pr: PRConfig | null = null;
   if (hasPrSection) {
