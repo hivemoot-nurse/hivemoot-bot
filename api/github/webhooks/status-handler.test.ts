@@ -136,6 +136,9 @@ describe("status webhook handler", () => {
         },
       },
     });
+    mocks.createPROperations.mockReturnValue({
+      getLabels: vi.fn().mockResolvedValue([]),
+    });
   });
 
   it("skips processing when merge-ready config is disabled", async () => {

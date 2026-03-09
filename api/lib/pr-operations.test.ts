@@ -388,10 +388,10 @@ describe("PROperations", () => {
   });
 
   describe("removeGovernanceLabels", () => {
-    it("should remove implementation, merge-ready, and automerge labels", async () => {
+    it("should remove implementation, merge-ready, automerge, and squash-queued labels", async () => {
       await prOps.removeGovernanceLabels(testRef);
 
-      expect(mockClient.rest.issues.removeLabel).toHaveBeenCalledTimes(3);
+      expect(mockClient.rest.issues.removeLabel).toHaveBeenCalledTimes(4);
       expect(mockClient.rest.issues.removeLabel).toHaveBeenCalledWith({
         owner: "test-org",
         repo: "test-repo",
@@ -409,6 +409,12 @@ describe("PROperations", () => {
         repo: "test-repo",
         issue_number: 42,
         name: LABELS.AUTOMERGE,
+      });
+      expect(mockClient.rest.issues.removeLabel).toHaveBeenCalledWith({
+        owner: "test-org",
+        repo: "test-repo",
+        issue_number: 42,
+        name: LABELS.SQUASH_QUEUED,
       });
     });
 
