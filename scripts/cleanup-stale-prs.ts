@@ -118,6 +118,11 @@ export async function processRepository(
       return;
     }
 
+    if (repoConfig.governance.pr.staleDays === null) {
+      logger.debug("Stale PR cleanup disabled (pr.staleDays not set). Skipping.");
+      return;
+    }
+
     const prs = createPROperations(octokit, { appId });
 
     // Find all open PRs with 'implementation' label
@@ -159,7 +164,7 @@ export async function processRepository(
 async function main(): Promise<void> {
   await runForAllRepositories({
     scriptName: "scheduled stale PR cleanup",
-    startMessage: "Per-repo config loaded from .github/hivemoot.yml (default: 3 days stale, 6 days close)",
+    startMessage: "Per-repo config loaded from .github/hivemoot.yml (stale cleanup runs only when governance.pr.staleDays is set)",
     processRepository,
   });
 }

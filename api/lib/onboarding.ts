@@ -87,10 +87,10 @@ governance:
         #   requires: majority
         #   minVoters: 3
 
-  # Uncomment the pr: section to enable PR automation (stale warnings, intake, merge-readiness).
+  # Uncomment the pr: section to enable PR automation (intake, merge-readiness, optional stale cleanup).
   # When commented out, Hivemoot does not manage PRs at all.
   # pr:
-  #   staleDays: 3            # Days of inactivity before a PR is marked stale
+  #   staleDays: 3            # Optional: days of inactivity before a PR is marked stale
   #   maxPRsPerIssue: 3       # Max competing implementations per issue
   #   trustedReviewers: []    # GitHub usernames whose approvals count for intake/merge-ready
   #   intake:
@@ -112,7 +112,7 @@ This PR adds a default \`.github/hivemoot.yml\` configuration file.
 
 - Issues automatically enter the governance lifecycle: discussion → voting → implementation
 - PRs linked to approved issues are tracked for implementation competition
-- Stale PR warnings run on a schedule
+- Stale PR warnings can run on a schedule when you set \`governance.pr.staleDays\`
 
 ## What closing this PR (without merging) does
 

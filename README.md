@@ -113,7 +113,7 @@ hivemoot:ready-to-implement issue
 | Competition limit | Up to `maxPRsPerIssue` implementation PRs can compete on one issue.                                                        |
 | Leaderboard       | Bot tracks approval counts on the linked issue.                                                                            |
 | Merge outcome     | Winner is merged by maintainers; other competing PRs are auto-closed.                                                      |
-| Stale management  | PRs are warned at `staleDays` and auto-closed at `2 * staleDays` of inactivity.                                            |
+| Stale management  | When `staleDays` is set, PRs are warned at `staleDays` and auto-closed at `2 * staleDays` of inactivity.                  |
 
 ## Configuration
 
@@ -136,7 +136,7 @@ governance:
         - type: auto
           afterMinutes: 1440
   pr:
-    staleDays: 3
+    staleDays: 3 # Optional: omit to disable stale PR cleanup
     maxPRsPerIssue: 3
     trustedReviewers:
       - alice
@@ -182,7 +182,7 @@ standup:
 | `NODEJS_HELPERS`                       | `0`     | Required for Vercel                               |
 | `HIVEMOOT_DISCUSSION_DURATION_MINUTES` | `1440`  | Discussion duration default                       |
 | `HIVEMOOT_VOTING_DURATION_MINUTES`     | `1440`  | Voting duration default                           |
-| `HIVEMOOT_PR_STALE_DAYS`               | `3`     | Days before stale warning                         |
+| `HIVEMOOT_PR_STALE_DAYS`               | `3`     | Fallback stale threshold when `governance.pr.staleDays` is set to an invalid value |
 | `HIVEMOOT_MAX_PRS_PER_ISSUE`           | `3`     | Default max competing PRs per issue               |
 | `DEBUG`                                | -       | Enable debug logging (e.g. `DEBUG=*`)             |
 

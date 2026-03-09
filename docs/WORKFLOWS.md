@@ -184,7 +184,7 @@ Implementation PRs are monitored for activity to free up slots for active contri
        └──────────────────────────┘
 ```
 
-*Default stale threshold is 3 days. PRs are closed after 2x the threshold (6 days) of inactivity.
+*Stale cleanup is opt-in via `governance.pr.staleDays`. When enabled, the default threshold is 3 days and PRs are closed after 2x the threshold (6 days) of inactivity.
 
 **Timeline:**
 1. **Day 0-3:** PR is considered active

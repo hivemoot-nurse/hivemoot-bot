@@ -1526,7 +1526,7 @@ governance:
         const config = await loadRepositoryConfig(octokit, "owner", "repo");
 
         expect(config.governance.pr).not.toBeNull();
-        expect(config.governance.pr!.staleDays).toBe(PR_STALE_THRESHOLD_DAYS);
+        expect(config.governance.pr!.staleDays).toBeNull();
         expect(config.governance.pr!.maxPRsPerIssue).toBe(MAX_PRS_PER_ISSUE);
         expect(config.governance.pr!.intake).toEqual([{ method: "auto" }]);
       });
@@ -1550,6 +1550,27 @@ governance:
         const config = await loadRepositoryConfig(octokit, "owner", "repo");
 
         expect(config.governance.pr.staleDays).toBe(PR_STALE_THRESHOLD_DAYS);
+      });
+
+      it("should keep stale cleanup disabled when staleDays key is omitted", async () => {
+        const configYaml = `
+governance:
+  pr:
+    maxPRsPerIssue: 5
+`;
+        const octokit = createMockOctokit({
+          data: {
+            type: "file",
+            content: encodeBase64(configYaml),
+            encoding: "base64",
+          },
+        });
+
+        const config = await loadRepositoryConfig(octokit, "owner", "repo");
+
+        expect(config.governance.pr).not.toBeNull();
+        expect(config.governance.pr!.staleDays).toBeNull();
+        expect(config.governance.pr!.maxPRsPerIssue).toBe(5);
       });
 
       it("should use default when requiredVoters is a plain string", async () => {
