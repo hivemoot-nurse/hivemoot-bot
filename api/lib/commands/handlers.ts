@@ -1364,6 +1364,87 @@ async function runLabelDoctorCheck(ctx: CommandContext): Promise<DoctorCheckResu
   };
 }
 
+/**
+ * Check raw governance config for `type: auto` exits that lack `afterMinutes`.
+ * The parser silently discards these and falls back to manual mode, so operators
+ * get `Config: pass` with no signal that their auto exits are broken.
+ *
+ * Covers all silent discard paths in the exits parsers:
+ * - `exits` is not an array (type error — clearly misconfigured)
+ * - `exits` contains mixed manual and auto entries (collapses to manual)
+ * - `exits` has `type: auto` entries missing a valid `afterMinutes` (entry is skipped)
+ *
+ * Returns advisory messages for each affected phase.
+ */
+function detectDiscardedAutoExits(rawConfig: unknown): string[] {
+  if (typeof rawConfig !== "object" || rawConfig === null || Array.isArray(rawConfig)) {
+    return [];
+  }
+
+  const raw = rawConfig as Record<string, unknown>;
+  const proposals = (raw.governance as Record<string, unknown> | undefined)?.proposals;
+  if (typeof proposals !== "object" || proposals === null || Array.isArray(proposals)) {
+    return [];
+  }
+
+  const proposalsObj = proposals as Record<string, unknown>;
+  const phases = [
+    { key: "discussion", label: "discussion" },
+    { key: "voting", label: "voting" },
+    { key: "extendedVoting", label: "extendedVoting" },
+  ];
+
+  const advisories: string[] = [];
+  for (const { key, label } of phases) {
+    const phase = proposalsObj[key];
+    if (typeof phase !== "object" || phase === null || Array.isArray(phase)) continue;
+    const exits = (phase as Record<string, unknown>).exits;
+    if (exits === undefined || exits === null) continue;
+
+    const phasePrefix = `\`governance.proposals.${label}.exits\``;
+
+    // Non-array exits value is a type error — the parser ignores it and falls back to manual
+    if (!Array.isArray(exits)) {
+      advisories.push(
+        `${phasePrefix} must be an array (got \`${typeof exits}\`) — it will be ignored and fall back to manual mode`,
+      );
+      continue;
+    }
+
+    // Mixed manual and auto entries: the parser collapses to manual-only with no in-band signal
+    const hasAuto = exits.some((e) => typeof e === "object" && e !== null && (e as Record<string, unknown>).type === "auto");
+    const hasManual = exits.some((e) => typeof e === "object" && e !== null && (e as Record<string, unknown>).type === "manual");
+    if (hasAuto && hasManual) {
+      advisories.push(
+        `${phasePrefix} mixes \`type: manual\` and \`type: auto\` entries — mixed exits are not supported and will fall back to manual mode`,
+      );
+      continue;
+    }
+
+    // type:auto entries with a missing or non-finite afterMinutes are silently skipped by
+    // the parser. If all auto entries are bad, the phase falls back to manual mode.
+    const isAutoEntry = (e: unknown): e is Record<string, unknown> =>
+      typeof e === "object" && e !== null && !Array.isArray(e) &&
+      (e as Record<string, unknown>).type === "auto";
+    const isBadAuto = (e: unknown): boolean =>
+      isAutoEntry(e) &&
+      (typeof (e as Record<string, unknown>).afterMinutes !== "number" ||
+        !Number.isFinite((e as Record<string, unknown>).afterMinutes as number));
+    const hasBadAuto = exits.some(isBadAuto);
+    if (hasBadAuto) {
+      const hasValidAuto = exits.some((e) => isAutoEntry(e) && !isBadAuto(e));
+      const suffix = hasValidAuto
+        ? ""
+        : " — the phase will fall back to manual mode";
+      advisories.push(
+        `${phasePrefix} has a \`type: auto\` entry with a missing or invalid \`afterMinutes\` — it will be silently discarded${suffix}`,
+      );
+    }
+  }
+
+  return advisories;
+}
+
 async function runConfigDoctorCheck(
   ctx: CommandContext,
   repoConfig: EffectiveConfig,
@@ -1407,6 +1488,17 @@ async function runConfigDoctorCheck(
     const intakeDetail = repoConfig.governance.pr
       ? `intake: ${repoConfig.governance.pr.intake.map((entry) => entry.method).join(", ") || "none"}`
       : "PR workflows: disabled";
+
+    const governanceAdvisories = detectDiscardedAutoExits(parsed);
+    if (governanceAdvisories.length > 0) {
+      return {
+        name: "Config",
+        status: "advisory",
+        detail: `Loaded \`${configPath}\` (${intakeDetail}) — governance exits are misconfigured and some entries will be discarded`,
+        subItems: governanceAdvisories,
+      };
+    }
+
     return {
       name: "Config",
       status: "pass",
