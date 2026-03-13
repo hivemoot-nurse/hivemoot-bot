@@ -72,6 +72,14 @@ export interface StandupConfig {
   category: string;
 }
 
+// ── Auto-Gather Config ──────────────────────────────────────────────────
+
+export interface AutoGatherConfig {
+  enabled: boolean;
+  minNewComments: number;
+  cooldownMinutes: number;
+}
+
 export interface VotingAutoExit {
   type: "auto";
   afterMs: number;
@@ -121,6 +129,11 @@ export interface RepoConfigFile {
     proposals?: {
       discussion?: {
         exits?: unknown[];
+        autoGather?: {
+          enabled?: boolean;
+          minNewComments?: number;
+          cooldownMinutes?: number;
+        };
       };
       voting?: {
         exits?: unknown[];
@@ -170,6 +183,7 @@ export interface EffectiveConfig {
         exits: DiscussionExit[];
         /** Derived from the last auto exit's afterMs (0 when manual-only). */
         durationMs: number;
+        autoGather: AutoGatherConfig;
       };
       voting: {
         exits: VotingExit[];
@@ -928,6 +942,66 @@ function parseMergeReadyConfig(
   return { minApprovals };
 }
 
+/**
+ * Parse and validate auto-gather config.
+ * Opt-in feature — disabled by default.
+ * When enabled, auto-gather triggers on discussion-phase issues after N new comments.
+ */
+function parseAutoGatherConfig(
+  value: unknown,
+  repoFullName: string
+): AutoGatherConfig {
+  const disabled: AutoGatherConfig = {
+    enabled: false,
+    minNewComments: CONFIG_BOUNDS.autoGather.minNewComments.default,
+    cooldownMinutes: CONFIG_BOUNDS.autoGather.cooldownMinutes.default,
+  };
+
+  if (value === undefined || value === null) {
+    return disabled;
+  }
+
+  if (typeof value !== "object" || Array.isArray(value)) {
+    logger.warn(
+      `[${repoFullName}] Invalid proposals.discussion.autoGather config: expected object. Disabling auto-gather.`
+    );
+    return disabled;
+  }
+
+  const obj = value as { enabled?: unknown; minNewComments?: unknown; cooldownMinutes?: unknown };
+
+  let enabled = false;
+  if (obj.enabled !== undefined && obj.enabled !== null) {
+    if (typeof obj.enabled === "boolean") {
+      enabled = obj.enabled;
+    } else {
+      logger.warn(
+        `[${repoFullName}] Invalid proposals.discussion.autoGather.enabled: expected boolean. Disabling auto-gather.`
+      );
+    }
+  }
+
+  if (!enabled) {
+    return disabled;
+  }
+
+  const minNewComments = parseIntValue(
+    obj.minNewComments,
+    CONFIG_BOUNDS.autoGather.minNewComments,
+    "proposals.discussion.autoGather.minNewComments",
+    repoFullName
+  );
+
+  const cooldownMinutes = parseIntValue(
+    obj.cooldownMinutes,
+    CONFIG_BOUNDS.autoGather.cooldownMinutes,
+    "proposals.discussion.autoGather.cooldownMinutes",
+    repoFullName
+  );
+
+  return { enabled: true, minNewComments, cooldownMinutes };
+}
+
 const DEFAULT_ALLOWED_PATHS = ["**/*.md", "**/*.txt", "docs/**"];
 const DEFAULT_DENY_PATHS = [
   ".github/**",
@@ -1187,6 +1261,12 @@ function deriveVotingDurationMs(exits: VotingExit[]): number {
 function parseRepoConfig(raw: unknown, repoFullName: string): EffectiveConfig {
   const config = raw as RepoConfigFile | undefined;
 
+  // Discussion auto-gather config
+  const autoGather = parseAutoGatherConfig(
+    config?.governance?.proposals?.discussion?.autoGather,
+    repoFullName
+  );
+
   // Discussion exits
   const discussionExitsRaw = config?.governance?.proposals?.discussion?.exits;
   const discussionExits = parseDiscussionExits(discussionExitsRaw, repoFullName);
@@ -1232,6 +1312,7 @@ function parseRepoConfig(raw: unknown, repoFullName: string): EffectiveConfig {
         discussion: {
           exits: discussionExits,
           durationMs: deriveDiscussionDurationMs(discussionExits),
+          autoGather,
         },
         voting: {
           exits,
@@ -1262,6 +1343,11 @@ export function getDefaultConfig(): EffectiveConfig {
         discussion: {
           exits: [DEFAULT_MANUAL_DISCUSSION_EXIT],
           durationMs: 0,
+          autoGather: {
+            enabled: false,
+            minNewComments: CONFIG_BOUNDS.autoGather.minNewComments.default,
+            cooldownMinutes: CONFIG_BOUNDS.autoGather.cooldownMinutes.default,
+          },
         },
         voting: {
           exits: [DEFAULT_MANUAL_VOTING_EXIT],

@@ -108,5 +108,6 @@ export type {
   AutomergeConfig,
   PRConfig,
   StandupConfig,
+  AutoGatherConfig,
 } from "./repo-config.js";
 export { isAutoVotingExit, isAutoDiscussionExit } from "./repo-config.js";
